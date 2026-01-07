@@ -1,0 +1,100 @@
+#quiz-subject {
+  font-weight: bold;
+  font-style: italic;
+}
+
+#quiz-heading {
+  color: white;
+  text-decoration: underline solid white;
+  text-align: center;
+  background-color: grey;
+  border-radius: 3vw;
+  border-color: grey;
+  padding: 10px;
+  border-style: double;
+  width: max-content;
+  margin: 0 auto;
+  margin-top: 5vh;
+}
+.option {
+  margin-top: 3vh;  
+  margin-left: 2vw ;
+  border-radius: 20px;
+  padding: 2vh;
+  width: max-content;
+  background-color: black;
+  color: white;
+  cursor: pointer;
+}
+.option:hover {
+  scale: 1.2;
+  transition: 0.4s;
+  background-color: #0a8bcc;
+}
+
+.correct {
+  justify-content: center;
+  text-align: center;
+  border-radius: 20px;
+  padding: 10px 10px;
+  width: fit-content;
+  background-color: green;
+  color: white;
+}
+
+.correct:hover {
+  scale: 1.2;
+  background-color: green;
+}
+.wrong {
+  justify-content: center;
+  text-align: center;
+  border-radius: 20px;
+  padding: 10px 10px;
+  width: fit-content;
+  background-color: red;
+  color: white;
+}
+
+.wrong:hover {
+  scale: 1.2;
+  background-color: red;
+}
+
+body {
+  min-height: 100vh;
+  background-image: url("background.png");
+}
+
+#Timer ,#ScoreTime{
+  margin-left: 25vw;
+  color: red;
+  background-color: black;
+  border-radius: 2vw;
+  width: max-content;
+  padding: 1vw;
+}
+
+.ques {
+  margin-top: 10vh;
+  margin-left: 2vw;
+  font-size: x-large;
+  font-weight: bold;
+  padding: 2vh;
+  border-radius: 2vw;
+  background-color:white;
+  width: max-content;
+}
+
+.result{
+  margin : 0 auto;
+  margin-top: 15vh;
+  justify-content: center;
+  text-align: center;
+  color:white;
+  background-color: grey;
+  border-radius: 2vw;
+  width: max-content;
+
+}
+

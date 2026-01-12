@@ -1,6 +1,8 @@
 let ques = document.getElementById("ques");
 let quizSubject = document.getElementById("quiz-subject");
 let scoreContainer = document.getElementById("score");
+let ScoreBox  = document.getElementById("ScoreTime");
+let TimeBox =document.getElementById("Timer")
 let score = 0;
 let Timer = document.getElementById("leftTime");
 
@@ -185,19 +187,19 @@ function QuestionMaker(i) {
   } else {
     clearInterval(timerCount);
     Timer.innerText = "0";
+    ScoreBox.innerText=`Final Score : ${score}`;
+    TimeBox.innerText ="Time Over";
     if (score <= questions.length * 1.5) {
-      // ques.style.alignContent ="centre"
+      
       ques.innerHTML = `<div class = "result">
       <h1>Your exam is over</h1>
-        <h1>OOPs you FAIL the exam.</h1>
+        <h1>OOPs you <span id="PassFail">FAIL </span>the exam.</h1>
         <h1>You need to study well</h1>
-        <h1>Your final score is <span>${score}</span></h1>
         </div>`;
     } else {
       ques.innerHTML = `<div class = "result">
         <h1>Your exam is over</h1>
-        <h1>Congratulations you PASS the exam </h1>
-        <h1>Your final score is <span>${score}</span></h1>
+        <h1>Congratulations you <span id="PassFail">PASS </span>the exam </h1>
         </div>`;
     }
   }

@@ -63,7 +63,7 @@
 
 body {
   min-height: 100vh;
-  background-image: url("background.png");
+  background-color: rgba(10, 105, 57, 0.55);
 }
 
 #Timer ,#ScoreTime{
@@ -89,12 +89,16 @@ body {
 .result{
   margin : 0 auto;
   margin-top: 15vh;
+  padding: 1.5vw;
   justify-content: center;
   text-align: center;
-  color:white;
-  background-color: grey;
+  background-color: rgb(110, 109, 109);
   border-radius: 2vw;
   width: max-content;
 
+}
+#PassFail{
+  color: red;
+  font-weight: bolder;
 }
 

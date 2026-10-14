@@ -22,6 +22,23 @@ import {
   resolveImages,
 } from "./src/service.js";
 import katex from "katex";
+import {
+  parseRoute,
+  routePath,
+  defaultPath,
+  accessRoute,
+  safeReturnPath,
+  ownAttempt,
+} from "./src/routes.js";
+const basePath = globalThis.EXAMENGINE_CONFIG?.basePath || "/";
+const publicViews = new Set([
+  "privacy",
+  "signin",
+  "callback",
+  "forbidden",
+  "notFound",
+]);
+let routeEpoch = 0;
 
 const app = document.querySelector("#app");
 let db = localPreview ? loadStore() : null,
@@ -67,13 +84,14 @@ const professor = () =>
 const professorCollege = () =>
   db.colleges.find((c) => c.id === professor()?.collegeId) || college();
 const quizById = (id) => db.quizzes.find((q) => q.id === id);
-const activeAttempt = () => db?.attempts.find((a) => a.status === "active");
+const activeAttempt = () =>
+  role === "student"
+    ? db?.attempts.find(
+        (a) => a.status === "active" && ownAttempt(a, routingContext()),
+      )
+    : null;
 const myAttempts = () =>
-  db.attempts.filter(
-    (a) =>
-      a.identity.email.toLowerCase() === db.identity.email.toLowerCase() &&
-      a.identity.collegeId === db.identity.collegeId,
-  );
+  db.attempts.filter((a) => ownAttempt(a, routingContext()));
 const displayedAttempt = () =>
   db.attempts.find((a) => a.id === selectedAttemptId);
 const fmtDate = (t) =>
@@ -151,6 +169,173 @@ async function command(op, payload, localMutation) {
 function go(next, id) {
   view = next;
   if (id) selectedQuizId = id;
+  navigatePath(pathForView(), false);
+  if (localPreview) render();
+  else void readRoute();
+  document.querySelector("main")?.focus({ preventScroll: true });
+  window.scrollTo(0, 0);
+}
+function routingContext() {
+  return db
+    ? {
+        db,
+        role,
+        identity: db.identity,
+        actorId: db.actorId,
+        professorId,
+        preview: localPreview,
+      }
+    : null;
+}
+function pathForView() {
+  const id = ["instructions", "preview"].includes(view)
+    ? selectedQuizId
+    : view === "editor"
+      ? editor?.id && quizById(editor.id)
+        ? editor.id
+        : null
+      : ["result", "grading"].includes(view)
+        ? selectedAttemptId
+        : view === "exam"
+          ? activeAttempt()?.id
+          : null;
+  return routePath(publicViews.has(view) ? null : role, view, id, basePath);
+}
+function navigatePath(path, replace = false) {
+  if (location.pathname !== path || location.search || location.hash)
+    window.history[replace ? "replaceState" : "pushState"]({}, "", path);
+}
+function showRouteError(kind) {
+  view = kind;
+  navigatePath(routePath(null, kind, null, basePath), true);
+  renderPublic(kind);
+}
+function renderPublic(kind) {
+  if (kind === "privacy") {
+    renderGate(
+      "Privacy information",
+      "How ExamEngine handles assessment information.",
+    );
+    document.querySelector(".auth-page .panel").innerHTML =
+      privacyContent() +
+      '<button data-action="home">Back to workspace</button>';
+    return;
+  }
+  if (kind === "forbidden" || kind === "notFound") {
+    renderGate(
+      kind === "forbidden" ? "Access denied" : "Page not available",
+      kind === "forbidden"
+        ? "Your account does not have permission to open this workspace."
+        : "This page or record is unavailable to your account.",
+    );
+    document
+      .querySelector(".auth-page .panel")
+      .insertAdjacentHTML(
+        "beforeend",
+        '<button class="primary" data-action="home">Back to workspace</button>',
+      );
+    return;
+  }
+  renderGate(
+    configured ? "Welcome to ExamEngine" : "Setup is not complete",
+    configured
+      ? "Sign in with your approved Google account."
+      : "The administrator needs to connect the backend and Google sign-in before assessments can be taken.",
+    configured,
+  );
+}
+function joinCodeKey(id) {
+  return "examengine.join." + (db.actorId || db.identity.email) + "." + id;
+}
+async function readRoute(verified = false) {
+  const epoch = ++routeEpoch;
+  let route = parseRoute(location.pathname, basePath);
+  if (db && !localPreview && !verified && route.role) {
+    const attempt = activeAttempt();
+    if (attempt) {
+      clearTimeout(answerTimer);
+      queueSave(attempt);
+      await saveChain;
+    }
+    if (epoch !== routeEpoch) return;
+    renderGate("Opening your workspace", "Checking access…");
+    try {
+      const fresh = await run("workspace");
+      if (epoch !== routeEpoch) return;
+      applyWorkspace(fresh);
+    } catch {
+      if (epoch !== routeEpoch) return;
+      db = null;
+    }
+  }
+  if (!db) {
+    if (route.role) {
+      sessionStorage.setItem("examengine.returnTo", location.pathname);
+      navigatePath(routePath(null, "signin", null, basePath), true);
+      route = { view: "signin" };
+    }
+    if (route.view === "root" || route.view === "callback") {
+      navigatePath(routePath(null, "signin", null, basePath), true);
+      route = { view: "signin" };
+    }
+    view = route.view;
+    renderPublic(view);
+    return;
+  }
+  if (["root", "signin", "callback"].includes(route.view)) {
+    const target = safeReturnPath(
+      sessionStorage.getItem("examengine.returnTo"),
+      role,
+      basePath,
+    );
+    sessionStorage.removeItem("examengine.returnTo");
+    navigatePath(target || defaultPath(role, basePath), true);
+    route = parseRoute(location.pathname, basePath);
+  }
+  if (
+    route.role === role &&
+    role === "student" &&
+    route.view === "instructions" &&
+    !quizById(route.id) &&
+    !localPreview
+  ) {
+    try {
+      const q = await run("quiz", {
+        quizId: route.id,
+        code: sessionStorage.getItem(joinCodeKey(route.id)) || "",
+      });
+      if (epoch !== routeEpoch) return;
+      db.quizzes.push(q);
+    } catch {
+      if (epoch === routeEpoch) showRouteError("notFound");
+      return;
+    }
+  }
+  let decision = accessRoute(route, routingContext());
+  if (decision.redirect) {
+    if (["forbidden", "notFound"].includes(decision.redirect)) {
+      showRouteError(decision.redirect);
+      return;
+    }
+    navigatePath(
+      routePath(role, decision.redirect, decision.id || null, basePath),
+      true,
+    );
+    route = parseRoute(location.pathname, basePath);
+    decision = accessRoute(route, routingContext());
+    if (!decision.allow) {
+      showRouteError("notFound");
+      return;
+    }
+  }
+  view = route.view;
+  if (["instructions", "preview"].includes(view)) selectedQuizId = route.id;
+  if (["result", "grading"].includes(view)) selectedAttemptId = route.id;
+  if (view === "instructions")
+    joinedCode = sessionStorage.getItem(joinCodeKey(route.id)) || "";
+  if (view === "editor")
+    editor = route.id ? structuredClone(quizById(route.id)) : newQuiz();
+  if (epoch !== routeEpoch) return;
   render();
   document.querySelector("main")?.focus({ preventScroll: true });
   window.scrollTo(0, 0);
@@ -446,7 +631,7 @@ function grading() {
     `<form id="grade-form" class="panel narrow">${reviewRows(a, true)}<p class="error" id="form-error" role="alert"></p><div class="actions">${a.quiz.questions.some((q) => q.type === "written") ? '<button class="primary">Save grades</button>' : ""}<button type="button" data-action="submissions">Back</button></div></form>`
   );
 }
-function admin() {
+function adminOverview() {
   return (
     heading(
       "College administration",
@@ -456,10 +641,61 @@ function admin() {
     `<div class="stats">${stat("Colleges", db.colleges.length)}${stat("Approved professors", db.professors.filter((p) => p.status === "approved").length)}${stat("Pending approvals", db.professors.filter((p) => p.status !== "approved").length)}</div><section class="panel"><h2>Colleges & student domains</h2>${db.colleges.map((c) => `<form class="form-grid college-edit" data-id="${escape(c.id)}" style="padding:20px 0;border-bottom:1px solid var(--line)"><label>College name<input name="name" maxlength="100" required value="${escape(c.name)}"></label><label>Allowed domains (comma-separated)<input name="domains" required value="${escape(c.domains.join(", "))}"></label><label class="check-label"><input type="checkbox" name="enabled" ${c.enabled !== false ? "checked" : ""}>College enabled</label><div><button class="small">Update college</button></div></form>`).join("")}<form id="college-form" class="form-grid" style="margin-top:24px"><label>New college name<input name="name" maxlength="100" required></label><label>Allowed email domains<input name="domains" required placeholder="college.edu.in"></label><div class="full"><button>Add college</button></div></form></section><section class="panel"><h2>Professor access</h2><div class="table-wrap"><table><thead><tr><th>Professor</th><th>College</th><th>Status</th><th></th></tr></thead><tbody>${db.professors.map((p) => `<tr><td>${escape(p.name)}<p class="subtext">${escape(p.email)}</p></td><td>${escape(db.colleges.find((c) => c.id === p.collegeId)?.name)}</td><td><span class="badge ${p.status === "approved" ? "green" : "amber"}">${escape(p.status)}</span></td><td><button class="small" data-action="approve" data-id="${escape(p.id)}">${p.status === "approved" ? "Revoke approval" : "Approve"}</button></td></tr>`).join("")}</tbody></table></div><form id="professor-form" class="form-grid" style="margin-top:24px"><label>Professor name<input name="name" required maxlength="100"></label><label>Professor email<input name="email" type="email" required maxlength="254"></label><label>College<select name="collegeId">${collegeOptions("bmu")}</select></label><div class="full"><button>Add for approval</button></div></form><p class="subtext">Each professor signs in using their own Google account. Access requires administrator approval.</p></section>${db.audit?.length ? `<section class="panel"><h2>Recent administrative activity</h2>${db.audit.map((e) => `<p class="subtext">${escape(fmtDate(e.createdAt))} · ${escape(e.operation)} · ${escape(e.recordId || "")}</p>`).join("")}</section>` : ""}`
   );
 }
+function admin() {
+  const template = document.createElement("template");
+  template.innerHTML = adminOverview();
+  const sections = template.content.querySelectorAll("section.panel");
+  if (view === "professors")
+    return (
+      heading(
+        "Professor access",
+        "Manage separate, administrator-approved educator accounts.",
+      ) +
+      `<div class="stats">${stat("Approved", db.professors.filter((p) => p.status === "approved").length)}${stat("Pending", db.professors.filter((p) => p.status !== "approved").length)}${stat("Colleges", db.colleges.length)}</div>` +
+      sections[1].outerHTML
+    );
+  if (view === "audit")
+    return (
+      heading(
+        "Activity & backups",
+        "Review administrative activity and export private application records.",
+        '<button data-action="backup">Download backup</button>',
+      ) +
+      (sections[2]?.outerHTML || empty("No recent administrative activity."))
+    );
+  return (
+    heading(
+      "Colleges & eligibility",
+      "Manage institutions and allowed student email domains.",
+    ) + sections[0].outerHTML
+  );
+}
 function render() {
   if (!db) return;
+  if (publicViews.has(view)) {
+    renderPublic(view);
+    return;
+  }
   const a = activeAttempt();
   if (a && role === "student") view = "exam";
+  if (view === "exam" && !a) {
+    const previous = displayedAttempt();
+    view = previous?.status === "submitted" ? "result" : "dashboard";
+  }
+  const currentPath = pathForView();
+  const decision = accessRoute(
+    parseRoute(currentPath, basePath),
+    routingContext(),
+  );
+  if (decision.redirect) {
+    showRouteError(
+      ["forbidden", "notFound"].includes(decision.redirect)
+        ? decision.redirect
+        : "notFound",
+    );
+    return;
+  }
+  navigatePath(currentPath, true);
   const nav =
     role === "student"
       ? [
@@ -472,7 +708,11 @@ function render() {
             ["dashboard", "Assessments"],
             ["submissions", "Submissions"],
           ]
-        : [["dashboard", "Administration"]];
+        : [
+            ["dashboard", "Colleges"],
+            ["professors", "Professors"],
+            ["audit", "Activity & backups"],
+          ];
   const person =
     role === "professor"
       ? professor()?.name || "Professor"
@@ -494,7 +734,7 @@ function render() {
             }[view] || professorDashboard
           )()
         : admin();
-  app.innerHTML = `<div class="shell"><aside class="sidebar"><a href="#" class="brand" data-action="dashboard"><span class="brand-mark">E</span>ExamEngine</a><div class="workspace-label">Workspace</div><nav class="nav" aria-label="Main navigation">${nav.map(([id, title]) => `<button data-action="${id}" class="${id === view ? "active" : ""}" ${a ? "disabled" : ""}>${title}</button>`).join("")}</nav><div class="sidebar-bottom">${localPreview ? `<label class="role-label" for="role">Preview workspace</label><select id="role" aria-label="Preview workspace" ${a ? "disabled" : ""}>${["student", "professor", "admin"].map((r) => `<option value="${r}" ${r === role ? "selected" : ""}>${r[0].toUpperCase() + r.slice(1)} preview</option>`).join("")}</select>` : `<button class="ghost small" data-action="refresh">Refresh workspace</button><button class="ghost small" data-action="signout">Sign out</button>`}<p class="sidebar-note">Focused assessments.<br>Built for learning.</p><button class="ghost small" data-action="privacy">Privacy information</button></div></aside><div class="content"><header class="topbar"><span class="topbar-label">${escape(role === "admin" ? "Platform administration" : (role === "professor" ? professorCollege() : college()).name + " / " + role)}</span><div class="profile">${localPreview ? '<span class="badge">Local preview</span>' : ""}<span class="profile-name">${escape(person)}</span><span class="avatar">${escape(
+  app.innerHTML = `<div class="shell"><aside class="sidebar"><a href="${defaultPath(role, basePath)}" class="brand" data-action="dashboard"><span class="brand-mark">E</span>ExamEngine</a><div class="workspace-label">Workspace</div><nav class="nav" aria-label="Main navigation">${nav.map(([id, title]) => `<a href="${routePath(role, id, null, basePath)}" data-action="${id}" class="${id === view ? "active" : ""}" ${a ? 'aria-disabled="true"' : ""}>${title}</a>`).join("")}</nav><div class="sidebar-bottom">${localPreview ? `<label class="role-label" for="role">Preview workspace</label><select id="role" aria-label="Preview workspace" ${a ? "disabled" : ""}>${["student", "professor", "admin"].map((r) => `<option value="${r}" ${r === role ? "selected" : ""}>${r[0].toUpperCase() + r.slice(1)} preview</option>`).join("")}</select>` : `<button class="ghost small" data-action="refresh">Refresh workspace</button><button class="ghost small" data-action="signout">Sign out</button>`}<p class="sidebar-note">Focused assessments.<br>Built for learning.</p><button class="ghost small" data-action="privacy">Privacy information</button></div></aside><div class="content"><header class="topbar"><span class="topbar-label">${escape(role === "admin" ? "Platform administration" : (role === "professor" ? professorCollege() : college()).name + " / " + role)}</span><div class="profile">${localPreview ? '<span class="badge">Local preview</span>' : ""}<span class="profile-name">${escape(person)}</span><span class="avatar">${escape(
     person
       .split(" ")
       .map((s) => s[0])
@@ -504,7 +744,7 @@ function render() {
   tick();
 }
 function renderGate(title, message, signin = false) {
-  app.innerHTML = `<main id="main" class="auth-page"><a class="brand" href="#"><span class="brand-mark">E</span>ExamEngine</a><div class="panel"><p class="eyebrow">Focused college assessments</p><h1>${escape(title)}</h1><p class="muted">${escape(message)}</p>${signin ? '<button class="primary" data-action="signin">Continue with Google</button>' : ""}<p class="error" id="form-error" role="alert"></p><p class="subtext">Student accounts require an approved college email domain. Professor access is approved by an administrator.</p><button class="ghost small" data-action="privacy">Privacy information</button></div></main>`;
+  app.innerHTML = `<main id="main" class="auth-page"><a class="brand" href="${db ? defaultPath(role, basePath) : routePath(null, "signin", null, basePath)}" data-action="home"><span class="brand-mark">E</span>ExamEngine</a><div class="panel"><p class="eyebrow">Focused college assessments</p><h1>${escape(title)}</h1><p class="muted">${escape(message)}</p>${signin ? '<button class="primary" data-action="signin">Continue with Google</button>' : ""}<p class="error" id="form-error" role="alert"></p><p class="subtext">Student accounts require an approved college email domain. Professor access is approved by an administrator.</p><button class="ghost small" data-action="privacy">Privacy information</button></div></main>`;
 }
 function collectIdentity(form, forced) {
   const f = new FormData(form);
@@ -825,6 +1065,7 @@ app.addEventListener("change", async (event) => {
     if (event.target.id === "role") {
       if (activeAttempt()) return;
       role = event.target.value;
+      sessionStorage.setItem("examengine.previewRole", role);
       editor = null;
       go("dashboard");
     }
@@ -863,10 +1104,24 @@ app.addEventListener("change", async (event) => {
 app.addEventListener("click", async (event) => {
   const el = event.target.closest("[data-action]");
   if (!el) return;
+  if (
+    el.tagName === "A" &&
+    (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey)
+  )
+    return;
   event.preventDefault();
   const action = el.dataset.action,
     id = el.dataset.id;
   if (busy) return;
+  if (action === "home") {
+    navigatePath(
+      db
+        ? defaultPath(role, basePath)
+        : routePath(null, "signin", null, basePath),
+    );
+    await readRoute();
+    return;
+  }
   if (action === "privacy") {
     showPrivacy();
     return;
@@ -884,7 +1139,16 @@ app.addEventListener("click", async (event) => {
   busy = true;
   el.disabled = true;
   try {
-    if (["dashboard", "profile", "history", "submissions"].includes(action)) {
+    if (
+      [
+        "dashboard",
+        "profile",
+        "history",
+        "submissions",
+        "professors",
+        "audit",
+      ].includes(action)
+    ) {
       if (activeAttempt()) return;
       editor = null;
       go(action);
@@ -1055,6 +1319,7 @@ app.addEventListener("submit", async (event) => {
       }
       if (!q)
         throw new Error("No available quiz matches that code in your college.");
+      sessionStorage.setItem(joinCodeKey(q.id), joinedCode);
       go("instructions", q.id);
     } else if (form.id === "profile-form" || form.id === "start-form") {
       if (activeAttempt()) throw new Error("An assessment is already active.");
@@ -1261,9 +1526,11 @@ function exportResults() {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 function showPrivacy() {
-  const dialog = document.createElement("dialog");
+  go("privacy");
+}
+function privacyContent() {
   const config = globalThis.EXAMENGINE_CONFIG || {};
-  dialog.innerHTML =
+  return (
     '<h2>Privacy information</h2><p>ExamEngine records your verified email, name, college, class, roll number, quiz responses, and results. Approved professors access their own assessments; platform administrators manage college access.</p><p>No camera, microphone, or location is collected. Google provides account identity. The institution must publish its retention policy and support contact before inviting real students.</p><p class="subtext">' +
     (localPreview
       ? "This preview stores data only in this browser."
@@ -1275,10 +1542,8 @@ function showPrivacy() {
     (config.supportEmail
       ? `<p>Support: <a href="mailto:${escape(config.supportEmail)}">${escape(config.supportEmail)}</a></p>`
       : "") +
-    '<form method="dialog"><button>Close</button></form>';
-  document.body.append(dialog);
-  dialog.addEventListener("close", () => dialog.remove());
-  dialog.showModal();
+    ""
+  );
 }
 function downloadJSON(value, filename) {
   const url = URL.createObjectURL(
@@ -1296,7 +1561,8 @@ async function signIn() {
     const { error } = await client.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: location.origin + location.pathname,
+        redirectTo:
+          location.origin + routePath(null, "callback", null, basePath),
         queryParams: { prompt: "select_account" },
       },
     });
@@ -1327,6 +1593,7 @@ async function signOut() {
     return;
   }
   db = null;
+  navigatePath(routePath(null, "signin", null, basePath), true);
   renderGate(
     "Welcome to ExamEngine",
     "Sign in with your approved college or professor Google account.",
@@ -1334,31 +1601,31 @@ async function signOut() {
   );
 }
 async function bootstrap() {
+  const epoch = ++routeEpoch;
   if (localPreview) {
+    role = sessionStorage.getItem("examengine.previewRole") || "student";
+    if (!["student", "professor", "admin"].includes(role)) role = "student";
     persist();
-    render();
+    await readRoute(true);
     return;
   }
+  db = null;
   if (!configured) {
-    renderGate(
-      "Setup is not complete",
-      "The administrator needs to connect the backend and Google sign-in before assessments can be taken.",
-    );
+    await readRoute();
     return;
   }
   renderGate("Opening your workspace", "Checking your verified account…");
   try {
     const { data, error } = await client.auth.getSession();
+    if (epoch !== routeEpoch) return;
     if (error) throw error;
     if (!data.session) {
-      renderGate(
-        "Welcome to ExamEngine",
-        "Sign in with your approved college or professor Google account.",
-        true,
-      );
+      await readRoute();
       return;
     }
-    applyWorkspace(await run("workspace"));
+    const workspace = await run("workspace");
+    if (epoch !== routeEpoch) return;
+    applyWorkspace(workspace);
     const a = activeAttempt();
     if (a) {
       try {
@@ -1378,8 +1645,11 @@ async function bootstrap() {
         }
       } catch {}
     }
-    render();
+    await readRoute(true);
   } catch (e) {
+    if (epoch !== routeEpoch) return;
+    db = null;
+    navigatePath(routePath(null, "signin", null, basePath), true);
     renderGate("Account access unavailable", e.message, true);
   }
 }
@@ -1404,8 +1674,11 @@ document.addEventListener("visibilitychange", () => {
   if (!document.hidden) tick();
 });
 client?.auth.onAuthStateChange((event, session) => {
+  if (localPreview) return;
   if (event === "SIGNED_OUT") {
+    routeEpoch++;
     db = null;
+    navigatePath(routePath(null, "signin", null, basePath), true);
     renderGate(
       "Welcome to ExamEngine",
       "Sign in with your approved college or professor Google account.",
@@ -1431,4 +1704,5 @@ setInterval(async () => {
   }
 }, 60000);
 setInterval(tick, 1000);
+window.addEventListener("popstate", () => void readRoute());
 void bootstrap();

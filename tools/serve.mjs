@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { resolve, extname } from "node:path";
 import { build } from "esbuild";
 import { publicConfig } from "./config.mjs";
+import { isAppDocument } from "../src/routes.js";
 const config = publicConfig(!process.argv.includes("--live"));
 const portArgument = process.argv.indexOf("--port");
 const port = portArgument < 0 ? 4173 : Number(process.argv[portArgument + 1]);
@@ -22,7 +23,11 @@ http
       const pathname = decodeURIComponent(
           new URL(req.url, "http://localhost").pathname,
         ),
-        relative = pathname === "/" ? "index.html" : pathname.slice(1);
+        relative = isAppDocument(pathname, config.basePath)
+          ? "index.html"
+          : pathname.startsWith(config.basePath)
+            ? pathname.slice(config.basePath.length)
+            : "";
       let content,
         file = relative;
       if (relative === "script.js") {
@@ -46,6 +51,10 @@ http
           return res.end("Not found");
         }
         content = await readFile(resolve(file));
+        if (file === "index.html")
+          content = content
+            .toString()
+            .replace('<base href="/" />', `<base href="${config.basePath}" />`);
       }
       res.writeHead(200, {
         "Content-Type": types[extname(file)] || "text/plain",

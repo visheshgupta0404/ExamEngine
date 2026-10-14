@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { normalizeBase } from "../src/routes.js";
 export function publicConfig(preview = false) {
   if (existsSync(".env")) process.loadEnvFile(".env");
   const supabaseUrl = process.env.SUPABASE_URL || "",
@@ -33,5 +34,13 @@ export function publicConfig(preview = false) {
     throw new Error("Invalid public support email.");
   if (privacyUrl && !/^https:\/\//.test(privacyUrl))
     throw new Error("Privacy policy URL must use HTTPS.");
-  return { preview, supabaseUrl, supabaseKey, supportEmail, privacyUrl };
+  const basePath = normalizeBase(process.env.APP_BASE_PATH || "/");
+  return {
+    preview,
+    supabaseUrl,
+    supabaseKey,
+    supportEmail,
+    privacyUrl,
+    basePath,
+  };
 }

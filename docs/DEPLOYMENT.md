@@ -34,7 +34,7 @@ Optionally enable Supabase Cron and schedule `select exam_private.finalize_expir
 
 Use a Google Cloud project owned by you. Configure a web OAuth client and the consent screen. In Supabase's Google provider configuration, enter the client ID/secret. Use the **callback URL shown by Supabase** as the authorized Google redirect URI; do not guess it.
 
-Add your actual frontend origin and localhost development origin where the provider requires them. In Supabase Auth URL Configuration, set the production site URL and explicitly allow the production path and `http://127.0.0.1:4173/` for local staging. Avoid unrestricted wildcard production redirects. Finish Google consent/verification or testing-user requirements shown by Google before inviting students.
+Add your actual frontend origin and localhost development origin where the provider requires them. In Supabase Auth URL Configuration, set the production site URL and explicitly allow `https://YOUR-HOST/auth/callback` and `http://127.0.0.1:4173/auth/callback` for local staging. For GitHub project hosting, the frontend callback includes the base path: `https://YOUR-USER.github.io/ExamEngine/auth/callback`. These frontend URLs differ from Google's authorized redirect URI, which remains the callback shown by Supabase. Avoid unrestricted wildcard production redirects. Finish Google consent/verification or testing-user requirements shown by Google before inviting students. See [Supabase redirect URL configuration](https://supabase.com/docs/guides/auth/redirect-urls).
 
 The initial administrator uses the private allowlist entry generated for your Gmail address. Each professor uses their own Google account and receives access only after admin approval. Students use verified emails from configured college domains and fill in name, roll number, and class. For formal exams, use an explicit roster; a self-declared class alone is not enrollment verification.
 
@@ -52,6 +52,8 @@ SUPABASE_PUBLISHABLE_KEY=YOUR-PUBLIC-PUBLISHABLE-KEY
 Use the **publishable** or legacy **anon** key, never the service-role/secret key. These two values are intentionally public in the built browser app; all permissions are enforced in the database. The build rejects secret keys. Google client secrets and database passwords belong only in provider settings.
 
 Optional public build variables `SUPPORT_EMAIL` and `PRIVACY_POLICY_URL` connect your institution-approved support contact and HTTPS privacy page to the in-app privacy screen. This needs configuration, not a code edit.
+
+Set `APP_BASE_PATH=/` for Cloudflare Pages or another host serving the app at its root. The GitHub Pages workflow supplies `/ExamEngine/`. This controls asset paths, navigation, and the frontend OAuth callback. See [the route map and hosting behavior](ROUTES.md).
 
 ## 5. Deploy on a free static host
 

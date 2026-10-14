@@ -48,6 +48,7 @@ jobs:
           SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
           SUPPORT_EMAIL: ${{ vars.SUPPORT_EMAIL }}
           PRIVACY_POLICY_URL: ${{ vars.PRIVACY_POLICY_URL }}
+          APP_BASE_PATH: /ExamEngine/
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Upload artifact

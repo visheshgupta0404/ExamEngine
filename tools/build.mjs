@@ -1,4 +1,13 @@
-import { mkdir, copyFile, cp, writeFile, rm, lstat } from "node:fs/promises";
+import {
+  mkdir,
+  copyFile,
+  cp,
+  writeFile,
+  rm,
+  lstat,
+  readFile,
+} from "node:fs/promises";
+import { hostRedirects } from "../src/routes.js";
 import { resolve, sep } from "node:path";
 import { build } from "esbuild";
 import { publicConfig } from "./config.mjs";
@@ -26,8 +35,15 @@ await build({
   minify: true,
   legalComments: "eof",
 });
-for (const file of ["index.html", "style.css", "_headers"])
+for (const file of ["style.css", "_headers"])
   await copyFile(file, `dist/${file}`);
+const shell = (await readFile("index.html", "utf8")).replace(
+  '<base href="/" />',
+  `<base href="${config.basePath}" />`,
+);
+await writeFile("dist/index.html", shell);
+await writeFile("dist/404.html", shell);
+await writeFile("dist/_redirects", hostRedirects(config.basePath));
 await copyFile("node_modules/katex/dist/katex.min.css", "dist/katex.min.css");
 await cp("node_modules/katex/dist/fonts", "dist/fonts", { recursive: true });
 await writeFile(

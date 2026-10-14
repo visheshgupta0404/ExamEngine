@@ -208,7 +208,7 @@ begin
     select jsonb_agg(value || coalesce(v.answer_key->(value->>'id'),'{}')) into review from jsonb_array_elements(q->'questions'),exam_private.versions v where v.id=a.version_id;
     q:=jsonb_set(q,'{questions}',review);
   end if;
-  return jsonb_build_object('id',a.id,'quizId',a.quiz_id,'quiz',q,'identity',a.identity,
+  return jsonb_build_object('id',a.id,'userId',a.user_id,'quizId',a.quiz_id,'quiz',q,'identity',a.identity,
     'startedAt',extract(epoch from a.started_at)*1000,'deadline',extract(epoch from a.deadline)*1000,
     'questionDeadline',extract(epoch from a.question_deadline)*1000,'answers',a.answers,'flagged',a.flagged,'current',a.current_question,'revision',a.revision,
     'status',a.status,'reason',a.reason,'submittedAt',extract(epoch from a.submitted_at)*1000,
@@ -272,9 +272,11 @@ begin
     if exists(select 1 from exam_private.attempts where user_id=p.id and status='active' and deadline>now()) then raise exception 'Finish your active assessment before changing details.'; end if;
     if length(trim(coalesce(payload->>'name',''))) not between 1 and 100 or length(trim(coalesce(payload->>'roll',''))) not between 1 and 50 or length(trim(coalesce(payload->>'className',''))) not between 1 and 100 then raise exception 'Complete your name, roll number, and class.'; end if;
     update exam_private.profiles set name=trim(payload->>'name'),roll=trim(payload->>'roll'),class_name=trim(payload->>'className') where id=p.id returning * into p;
-  elsif operation='join' then
-    select * into q from exam_private.quizzes where code=upper(trim(payload->>'code')) and college_id=p.college_id and published;
-    if p.role<>'student' or q.id is null or coalesce(q.draft->>'joinMode','both')='roster' then raise exception 'No eligible quiz matches that code.' using errcode='42501'; end if;
+  elsif operation in ('join','quiz') then
+    select * into q from exam_private.quizzes where college_id=p.college_id and published and (operation='join' and code=upper(trim(payload->>'code')) or operation='quiz' and id=payload->>'quizId');
+    if p.role<>'student' or q.id is null or operation='join' and coalesce(q.draft->>'joinMode','both')='roster' then raise exception 'Assessment unavailable.' using errcode='42501'; end if;
+    if coalesce(q.draft->>'joinMode','both')='code' and upper(trim(coalesce(payload->>'code','')))<>q.code then raise exception 'Assessment unavailable.' using errcode='42501'; end if;
+    if coalesce(q.draft->>'joinMode','both')='roster' and not exists(select 1 from exam_private.rosters r where r.quiz_id=q.id and r.email=p.email and (r.roll='' or lower(r.roll)=lower(p.roll))) then raise exception 'Assessment unavailable.' using errcode='42501'; end if;
     if lower(q.draft->>'className')<>lower(p.class_name) then raise exception 'This quiz is assigned to another class.' using errcode='42501'; end if;
     select * into v from exam_private.versions where id=q.current_version;
     return v.public_quiz || jsonb_build_object('published',q.published,'release',q.release);

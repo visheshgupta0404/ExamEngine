@@ -11,3 +11,5 @@ The implementation is prepared in the Quiz App repository on `codex/examengine-f
 No passwords, service-role keys, or Google client secrets need to be pasted into chat. No custom domain or paid upgrade is required to start within free-tier limits.
 
 Private image uploads need the storage migration. Application backups do not include Google accounts or image binaries; protect and back up those through the institution-approved account tooling separately.
+
+Routes are already implemented. For root hosting use `APP_BASE_PATH=/`; GitHub Pages builds use `/ExamEngine/`. Allow the exact frontend `/auth/callback` path (including any base path) in Supabase Auth, as detailed in the deployment guide. After deployment, refresh a student result, professor editor, and admin approval link and verify wrong-role URLs are denied.

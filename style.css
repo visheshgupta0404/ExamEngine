@@ -133,16 +133,23 @@ button:hover:not(:disabled) {
   display: grid;
   gap: 6px;
 }
-.nav button {
+.nav a {
+  display: block;
+  padding: 12px 16px;
+  border-radius: 8px;
   text-align: left;
   border: 0;
   background: transparent;
   color: var(--muted);
   font-weight: 500;
 }
-.nav button.active {
+.nav a.active {
   background: #1b2d49;
   color: var(--accent);
+}
+.nav a:hover {
+  background: #1b2d49;
+  color: var(--text);
 }
 .sidebar-bottom {
   margin-top: auto;
@@ -800,7 +807,7 @@ legend.question-title {
     overflow: auto;
     gap: 8px;
   }
-  .nav button {
+  .nav a {
     white-space: nowrap;
     font-size: 0.85rem;
     padding: 9px 13px;
@@ -989,4 +996,12 @@ legend.question-title {
 }
 .review-row {
   overflow-wrap: anywhere;
+}
+
+.nav a {
+  text-decoration: none;
+}
+.nav a[aria-disabled="true"] {
+  pointer-events: none;
+  opacity: 0.5;
 }

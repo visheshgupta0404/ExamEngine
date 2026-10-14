@@ -136,6 +136,9 @@ test("production PostgreSQL migration and authorization workflows", async (t) =>
         assert.equal(w.quizzes[0].questions[0].correctOptions, undefined);
         w = await rpc("start", { quizId: quiz.id });
         attemptId = w.attempts[0].id;
+        assert.equal(w.attempts[0].userId, users.student);
+        const metadata = await rpc("quiz", { quizId: quiz.id });
+        assert.equal(metadata.questions[0].correctOption, undefined);
         const retry = await rpc("start", { quizId: quiz.id });
         assert.equal(retry.attempts.length, 1);
         assert.equal(retry.attempts[0].id, attemptId);
@@ -152,6 +155,7 @@ test("production PostgreSQL migration and authorization workflows", async (t) =>
         });
         assert.equal(w.quizzes.length, 0);
         assert.equal(w.attempts.length, 0);
+        await assert.rejects(rpc("quiz", { quizId: quiz.id }), /unavailable/);
         await assert.rejects(rpc("start", { quizId: quiz.id }), /denied/);
         await assert.rejects(
           rpc("save", { attemptId, answers: {}, revision: 1 }),
@@ -160,6 +164,50 @@ test("production PostgreSQL migration and authorization workflows", async (t) =>
         await as("second");
         await rpc("profile", { name: "Second", roll: "002", className: "CSE" });
         await assert.rejects(rpc("submit", { attemptId }), /denied/);
+      },
+    );
+    await t.test(
+      "deep-link metadata requires code or roster eligibility",
+      async () => {
+        await as("professor");
+        const codeQuiz = {
+          ...quiz,
+          id: "route-code",
+          code: "ROUTE-101",
+          joinMode: "code",
+        };
+        await rpc("saveQuiz", { quiz: codeQuiz });
+        await rpc("publish", { quizId: codeQuiz.id, published: true });
+        const rosterQuiz = {
+          ...quiz,
+          id: "route-roster",
+          code: "ROUTE-102",
+          joinMode: "roster",
+          roster: [{ email: "student@bmu.edu.in", roll: "001" }],
+        };
+        await rpc("saveQuiz", { quiz: rosterQuiz });
+        await rpc("roster", { quizId: rosterQuiz.id, rows: rosterQuiz.roster });
+        await rpc("publish", { quizId: rosterQuiz.id, published: true });
+        await as("student");
+        await assert.rejects(
+          rpc("quiz", { quizId: codeQuiz.id }),
+          /unavailable/,
+        );
+        const q = await rpc("quiz", {
+          quizId: codeQuiz.id,
+          code: codeQuiz.code,
+        });
+        assert.equal(q.id, codeQuiz.id);
+        assert.equal(q.questions[0].correctOption, undefined);
+        assert.equal(
+          (await rpc("quiz", { quizId: rosterQuiz.id })).id,
+          rosterQuiz.id,
+        );
+        await as("second");
+        await assert.rejects(
+          rpc("quiz", { quizId: rosterQuiz.id }),
+          /unavailable/,
+        );
       },
     );
     await t.test(
@@ -343,7 +391,10 @@ test("production PostgreSQL migration and authorization workflows", async (t) =>
         await as("student");
         w = await rpc("workspace");
         assert.equal(w.attempts.find((x) => x.id === a.id).result.score, 1.5);
-        assert.equal(w.attempts.find(x=>x.id===a.id).manualGrades.essay.feedback,'Clear but brief.');
+        assert.equal(
+          w.attempts.find((x) => x.id === a.id).manualGrades.essay.feedback,
+          "Clear but brief.",
+        );
       },
     );
     await t.test(
@@ -445,13 +496,45 @@ test("production PostgreSQL migration and authorization workflows", async (t) =>
         );
       },
     );
-    await t.test('private images follow attempt eligibility and result release',async()=>{
-      await as('professor');const imageQuiz={...quiz,id:'images',code:'IMG-101',release:false,questions:[{...quiz.questions[0],imagePath:users.professor+'/figure.png',image:''}]};await rpc('saveQuiz',{quiz:imageQuiz});await rpc('publish',{quizId:imageQuiz.id,published:true});
-      await as('student');let w=await rpc('start',{quizId:imageQuiz.id});const a=w.attempts.find(x=>x.status==='active');let response=await pg.query('select * from storage.objects');assert.equal(response.rows.length,1);
-      await as('other');response=await pg.query('select * from storage.objects');assert.equal(response.rows.length,0);
-      await as('student');await rpc('submit',{attemptId:a.id});response=await pg.query('select * from storage.objects');assert.equal(response.rows.length,0);
-      await as('professor');imageQuiz.release=true;await rpc('saveQuiz',{quiz:imageQuiz});await as('student');response=await pg.query('select * from storage.objects');assert.equal(response.rows.length,1);
-    });
+    await t.test(
+      "private images follow attempt eligibility and result release",
+      async () => {
+        await as("professor");
+        const imageQuiz = {
+          ...quiz,
+          id: "images",
+          code: "IMG-101",
+          release: false,
+          questions: [
+            {
+              ...quiz.questions[0],
+              imagePath: users.professor + "/figure.png",
+              image: "",
+            },
+          ],
+        };
+        await rpc("saveQuiz", { quiz: imageQuiz });
+        await rpc("publish", { quizId: imageQuiz.id, published: true });
+        await as("student");
+        let w = await rpc("start", { quizId: imageQuiz.id });
+        const a = w.attempts.find((x) => x.status === "active");
+        let response = await pg.query("select * from storage.objects");
+        assert.equal(response.rows.length, 1);
+        await as("other");
+        response = await pg.query("select * from storage.objects");
+        assert.equal(response.rows.length, 0);
+        await as("student");
+        await rpc("submit", { attemptId: a.id });
+        response = await pg.query("select * from storage.objects");
+        assert.equal(response.rows.length, 0);
+        await as("professor");
+        imageQuiz.release = true;
+        await rpc("saveQuiz", { quiz: imageQuiz });
+        await as("student");
+        response = await pg.query("select * from storage.objects");
+        assert.equal(response.rows.length, 1);
+      },
+    );
     await t.test(
       "backup access is admin-only and application records restore into an empty database",
       async () => {

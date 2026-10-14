@@ -32,6 +32,7 @@ npm run build
 - College/domain configuration, approved professor accounts, audit events, private backup export, and reviewed restore tooling.
 - PostgreSQL RPCs with server-authoritative timing/grading, role/college checks, protected answer keys, revision checking, idempotent start/submit, and per-account request limits.
 - Google OAuth with PKCE, verified college domains, private admin provisioning, session refresh, and sign-out.
+- Separate student, professor, and admin routes, record ownership guards, direct-link refresh, browser history, and a dedicated OAuth callback. See [route and access documentation](docs/ROUTES.md).
 - Production builds, locked dependencies, deployment checks, security headers, and a safe unconfigured setup screen. Preview roles work only on loopback hostnames.
 
 ## Setup

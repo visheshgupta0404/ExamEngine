@@ -438,10 +438,3 @@ revoke all on all functions in schema exam_private from public,anon,authenticate
 revoke all on function public.examengine(text,jsonb) from public,anon;
 grant execute on function public.examengine(text,jsonb) to authenticated;
 commit;
-
-
-
-
-
-
-

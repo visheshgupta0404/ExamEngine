@@ -1,0 +1,27 @@
+{
+  "name": "examengine",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node tools/serve.mjs",
+    "dev:live": "node tools/serve.mjs --live",
+    "build": "node tools/build.mjs",
+    "build:preview": "node tools/build.mjs --preview",
+    "format": "prettier --write script.js src/*.js tools/*.mjs tests/*.js style.css index.html",
+    "test": "node --test tests/*.test.js",
+    "check": "node --check script.js && node --check src/core.js && node --check src/data.js && node --check src/store.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.9",
+    "esbuild": "^0.28.2",
+    "prettier": "^3.9.10"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.117.3",
+    "katex": "^0.19.0"
+  }
+}

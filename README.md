@@ -1,133 +1,46 @@
-<h1 align="center">✨ ExamEngine – Quiz Web App ✨</h1>
+# ExamEngine
 
-<p align="center">
-  <b>HTML • CSS • Vanilla JavaScript</b><br />
-  A developer-focused quiz web application with timer, score tracking, and an interactive real-exam experience
-</p>
+A focused dark-blue assessment platform for multiple colleges. Students take assessments and review released results; approved professors author quizzes and grade submissions; administrators configure college email domains and professor access.
 
-<p align="center">
-  🔗 <b>Live Demo:</b>
-  <a href="https://visheshgupta0404.github.io/ExamEngine/" target="_blank">
-    Visit ExamEngine
-  </a>
-</p>
+**Status:** application and backend implementation are prepared for setup. Local preview and PostgreSQL policy/rule tests work. Live Google/Supabase integration and hosting acceptance still require your accounts and configuration; do not invite real students until the staging checks pass.
 
-<p align="center">
-  <img src="WebPage.png" alt="ExamEngine Webpage Screenshot" width="520" />
-</p>
+## Development
 
-<hr />
+Node.js 24 recommended. Dependencies are locked; no paid development service is required.
 
-<h2 align="center">🎯 About the Project</h2>
+```sh
+npm ci
+npm run dev
+```
 
-<p align="center">
-  <b>ExamEngine</b> is a browser-based quiz application built to strengthen
-  <b>JavaScript fundamentals</b>, <b>DOM manipulation</b>, and <b>real-world UI thinking</b>.
-  It simulates an actual exam interface where users answer questions under time pressure and receive instant feedback.
-</p>
+Open http://127.0.0.1:4173. Local preview includes sample BMU data and a role switch. Use sample code `WEB-101`, a sample `@bmu.edu.in` email, roll number, and class `CSE · 2024`. Preview identities and grading are not production security, and preview records stay in that browser.
 
-<p align="center">
-  ✨ <b>Mission:</b> Build practical frontend projects<br />
-  🔥 <b>Approach:</b> Learn → Build → Improve → Repeat
-</p>
+```sh
+npm test
+npm run check
+npm run build
+```
 
-<hr />
+`npm run dev:live` runs the configured Supabase version without preview identities. Set browser-safe backend values in ignored `.env`, as documented in `.env.example`.
 
-<h2 align="center">🚀 Features</h2>
+## Implemented
 
-<ul>
-  <li>⏱️ Timer for each question</li>
-  <li>📊 Real-time score tracking</li>
-  <li>🎯 Correct answer highlighting</li>
-  <li>🎨 Clean, creative and interactive UI</li>
-  <li>✨ Smooth hover effects on all options</li>
-  <li🧠 Developer-focused quiz flow</li>
-  <li>📱 Responsive layout</li>
-  <li>⚡ Built using pure Vanilla JavaScript</li>
-  <li>🧩 Easy to extend with new questions and subjects</li>
-</ul>
+- Student identity, assigned quizzes, code joining, roster restrictions, attempts, history, and result release.
+- Single-choice, multiple-select, and written questions; equations, HTTPS illustrations, and private image uploads.
+- Exam and per-question deadlines, scheduling, question randomization, forward-only or free navigation, autosave, review flags, clear selection, refresh recovery, and timeout submission.
+- Configurable scoring/penalties/attempt limits, immutable attempt versions, manual written grading, class summaries, and safe CSV exports.
+- College/domain configuration, approved professor accounts, audit events, private backup export, and reviewed restore tooling.
+- PostgreSQL RPCs with server-authoritative timing/grading, role/college checks, protected answer keys, revision checking, idempotent start/submit, and per-account request limits.
+- Google OAuth with PKCE, verified college domains, private admin provisioning, session refresh, and sign-out.
+- Separate student, professor, and admin routes, record ownership guards, direct-link refresh, browser history, and a dedicated OAuth callback. See [route and access documentation](docs/ROUTES.md).
+- Production builds, locked dependencies, deployment checks, security headers, and a safe unconfigured setup screen. Preview roles work only on loopback hostnames.
 
-<hr />
+## Setup
 
-<h2 align="center">🛠️ Tech Stack</h2>
+Follow [the deployment guide](docs/DEPLOYMENT.md) for Supabase migrations, Google provider settings, free static hosting, backup/restore, and the required real-account staging checklist. Your private administrator provisioning SQL is in ignored `work/provision.local.sql`. The local implementation plan is also ignored.
 
-<ul>
-  <li><b>HTML</b> – Structure of the app</li>
-  <li><b>CSS</b> – Styling, layout, and UI effects</li>
-  <li><b>JavaScript (Vanilla JS)</b> – Quiz logic, timer, score handling</li>
-</ul>
+Free-tier quotas and inactivity rules apply. No paid plan has been enabled. Live capacity, institutional privacy/retention policy, and provider configuration must be confirmed before production use. No camera, microphone, location, or proctoring is collected.
 
-<hr />
+## Author
 
-<h2 align="center">📂 Project Structure</h2>
-
-<pre>
-ExamEngine/
-│
-├── index.html
-├── style.css
-├── script.js
-├── WebPage.png
-├── Sample Video.mp4
-└── README.md
-</pre>
-
-<hr />
-
-<h2 align="center">▶️ How to Run Locally</h2>
-
-<ol>
-  <li>Clone the repository</li>
-</ol>
-
-<pre>
-git clone https://github.com/visheshgupta0404/ExamEngine.git
-</pre>
-
-<ol start="2">
-  <li>Navigate to the project folder</li>
-  <li>Open <code>index.html</code> in any modern browser</li>
-  <li>Start attempting the quiz 🎉</li>
-</ol>
-
-<hr />
-
-<h2 align="center">🌱 Learning Outcomes</h2>
-
-<ul>
-  <li>Handling dynamic UI using JavaScript</li>
-  <li>Working with timers using <code>setInterval</code> and <code>setTimeout</code></li>
-  <li>Building quiz logic and score systems</li>
-  <li>DOM manipulation using Vanilla JS</li>
-  <li>Designing real-world style interfaces</li>
-</ul>
-
-<hr />
-
-<h2 align="center">🔮 Future Improvements</h2>
-
-<ul>
-  <li>Add multiple quiz categories</li>
-  <li>User authentication system</li>
-  <li>Result summary page</li>
-  <li>Leaderboard system</li>
-  <li>Backend integration</li>
-</ul>
-
-<hr />
-
-<h2 align="center">👤 Author</h2>
-
-<p align="center">
-  <b>Vishesh Gupta</b><br />
-  Frontend Development Enthusiast<br />
-  🔗 <a href="https://github.com/visheshgupta0404" target="_blank">GitHub Profile</a>
-</p>
-
-<hr />
-
-<h2 align="center">⭐ Show Your Support</h2>
-
-<p align="center">
-  If you like this project, consider giving it a ⭐ on GitHub — it really motivates me to build more real-world projects!
-</p>
+[Vishesh Gupta](https://github.com/visheshgupta0404)

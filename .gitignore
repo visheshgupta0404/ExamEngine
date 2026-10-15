@@ -1,0 +1,27 @@
+# Local planning and scratch files
+/ExamEngine-plan.local.md
+/work/
+
+# Dependencies and generated output
+node_modules/
+dist/
+build/
+coverage/
+.cache/
+*.log
+
+# Secrets (keep documented examples)
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# OS metadata
+desktop.ini
+Thumbs.db
+.DS_Store
+
+/outputs/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal

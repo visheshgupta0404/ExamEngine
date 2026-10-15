@@ -1,22 +1,24 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
+    <base href="/" />
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Quiz App</title>
+    <meta name="theme-color" content="#0b1220" />
+    <meta
+      name="description"
+      content="ExamEngine — focused assessments for students and educators."
+    />
+    <title>ExamEngine · Assessments</title>
     <link rel="stylesheet" href="style.css" />
-    <script src="script.js" defer></script>
+    <link rel="stylesheet" href="katex.min.css" />
+    <script src="config.js"></script>
+    <script type="module" src="script.js"></script>
   </head>
   <body>
-    <div >
-      <h1 id="quiz-heading">
-        Today we have quiz of subject : <span id="quiz-subject">undefined</span>
-      </h1>
-      <h2 ><span id="ScoreTime">Score : <span id="score"></span> </span><span id="Timer">TimeLeft  : <span id ='leftTime'></span></h2>
-    </div>
-    <div id="ques">
-      <h2>Question</h2>
-    </div>
-    <div class="option-container"></div>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <div id="app"></div>
+    <div id="toast" role="status" aria-live="polite"></div>
+    <noscript>Enable JavaScript to use ExamEngine.</noscript>
   </body>
 </html>

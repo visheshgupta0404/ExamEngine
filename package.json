@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "setup:prepare": "node tools/prepare-setup.mjs",
     "dev": "node tools/serve.mjs",
     "dev:live": "node tools/serve.mjs --live",
     "build": "node tools/build.mjs",

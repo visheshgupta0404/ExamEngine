@@ -1,6 +1,6 @@
 # Remaining user setup
 
-The implementation is prepared in the Quiz App repository on `codex/examengine-foundation`. The development work has not been deployed to a cloud account.
+The implementation is on `main` in the Quiz App repository. Real backend and Google configuration remain pending. Follow [the launch walkthrough](LAUNCH.md) for the current account setup sequence.
 
 1. **Supabase:** create a Free project, choose the storage region, and apply migrations 001, 002, 003, followed by the generated private `work/provision.local.sql`.
 2. **Google:** create/configure your OAuth web client and consent screen, enable the Supabase Google provider, and use the callback and frontend URLs shown in the deployment guide. Keep Google secrets in provider settings.

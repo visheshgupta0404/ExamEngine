@@ -2067,12 +2067,16 @@ label {
   .quiz-card {
     padding: 19px;
     gap: 14px;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
   }
   .assessment-symbol {
     display: none;
   }
   .assessment-info {
-    flex-basis: 100%;
+    flex: auto;
+    width: 100%;
   }
   .quiz-card > button,
   .quiz-card > .actions {

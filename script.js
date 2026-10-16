@@ -249,6 +249,7 @@ function joinCodeKey(id) {
 }
 async function readRoute(verified = false) {
   const epoch = ++routeEpoch;
+  app.removeAttribute("aria-busy");
   let route = parseRoute(location.pathname, basePath);
   if (db && !localPreview && !verified && route.role) {
     const attempt = activeAttempt();
@@ -258,7 +259,7 @@ async function readRoute(verified = false) {
       await saveChain;
     }
     if (epoch !== routeEpoch) return;
-    renderGate("Opening your workspace", "Checking access…");
+    app.setAttribute("aria-busy", "true");
     try {
       const fresh = await run("workspace");
       if (epoch !== routeEpoch) return;
@@ -266,6 +267,8 @@ async function readRoute(verified = false) {
     } catch {
       if (epoch !== routeEpoch) return;
       db = null;
+    } finally {
+      if (epoch === routeEpoch) app.removeAttribute("aria-busy");
     }
   }
   if (!db) {
@@ -762,6 +765,10 @@ function render() {
 }
 function renderGate(title, message, signin = false) {
   app.innerHTML = `<main id="main" class="auth-page"><section class="auth-story" aria-label="About ExamEngine"><a class="brand" href="${db ? defaultPath(role, basePath) : routePath(null, "signin", null, basePath)}" data-action="home"><span class="brand-mark">${icon("book")}</span>ExamEngine</a><div class="auth-story-body"><p class="eyebrow">THE ASSESSMENT WORKSPACE</p><h2>A focused space <br>to do your best.</h2><p>From the first question to the final submission. A clear, considered assessment experience for students and educators.</p><div class="assessment-preview" aria-hidden="true"><div class="preview-top"><span>ASSESSMENT IN PROGRESS</span><span>08:42</span></div><div class="preview-progress"><i></i></div><span class="preview-label">QUESTION 04 / 10</span><p>Great questions deserve<br>your full attention.</p><div class="preview-option"><span>A</span><i></i><b>✓</b></div><div class="preview-option"><span>B</span><i></i></div><div class="preview-bottom"><span>Response saved</span><span>Next question →</span></div></div></div><div class="auth-story-footer"><span>Built around learning.</span><span>01 — EXAMENGINE</span></div></section><section class="auth-entry"><div class="auth-entry-top">STUDENTS & EDUCATORS <span>ACCOUNT ACCESS</span></div><div class="panel auth-card"><div class="auth-lock">${icon("lock")}</div><p class="eyebrow">YOUR WORKSPACE AWAITS</p><h1>${escape(title === "Welcome to ExamEngine" ? "Welcome back." : title)}</h1><p class="muted auth-message">${escape(signin && title === "Welcome to ExamEngine" ? "Sign in to access your assessments, submissions, and results." : message)}</p>${signin ? `<button class="google-signin" data-action="signin"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path fill="#4285F4" d="M21.6 12.2c0-.7-.1-1.4-.2-2.1H12v4h5.4a4.6 4.6 0 0 1-2 3v2.5h3.3c1.9-1.7 2.9-4.2 2.9-7.4Z"/><path fill="#34A853" d="M12 22c2.7 0 5-.9 6.7-2.4l-3.3-2.5c-.9.6-2 1-3.4 1a6 6 0 0 1-5.7-4.2H2.9v2.6A10 10 0 0 0 12 22Z"/><path fill="#FBBC05" d="M6.3 13.9a6 6 0 0 1 0-3.8V7.5H2.9a10 10 0 0 0 0 9l3.4-2.6Z"/><path fill="#EA4335" d="M12 5.9c1.5 0 2.8.5 3.9 1.5l2.9-2.9A9.7 9.7 0 0 0 12 2a10 10 0 0 0-9.1 5.5l3.4 2.6A6 6 0 0 1 12 5.9Z"/></svg>Continue with Google ${icon("arrow")}</button>` : ""}<p class="error" id="form-error" role="alert"></p><div class="access-note">${icon("lock")}<p>Use your college or approved educator account.<br>Your institution manages workspace access.</p></div><button class="privacy-link" data-action="privacy">Privacy & account information ${icon("arrow")}</button></div><footer class="auth-entry-footer"><span>ExamEngine © ${new Date().getFullYear()}</span><span>Focus on what you know.</span></footer></section></main>`;
+}
+
+function renderSessionLoading() {
+  app.innerHTML = `<main id="main" class="session-loading" aria-busy="true"><span class="brand"><span class="brand-mark">${icon("book")}</span>ExamEngine</span><div role="status"><span class="loading-ring" aria-hidden="true"></span><p>Opening your workspace…</p></div></main>`;
 }
 
 function collectIdentity(form, forced) {
@@ -1632,7 +1639,7 @@ async function bootstrap() {
     await readRoute();
     return;
   }
-  renderGate("Opening your workspace", "Checking your verified account…");
+  renderSessionLoading();
   try {
     const { data, error } = await client.auth.getSession();
     if (epoch !== routeEpoch) return;

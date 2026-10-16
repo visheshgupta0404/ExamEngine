@@ -1007,6 +1007,61 @@ legend.question-title {
 }
 
 /* Workspace composition: quiet surfaces, deliberate hierarchy, one accent. */
+.session-loading {
+  min-height: 100svh;
+  max-width: none;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 40px;
+}
+.session-loading [role="status"] {
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.loading-ring {
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: loading-turn 1s linear infinite;
+}
+#app[aria-busy="true"] {
+  cursor: progress;
+}
+#app[aria-busy="true"] .topbar::after {
+  content: "";
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+  background: var(--accent);
+  z-index: 20;
+  animation: loading-pulse 1s ease-in-out infinite alternate;
+}
+@keyframes loading-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes loading-pulse {
+  from {
+    opacity: 0.25;
+  }
+  to {
+    opacity: 0.85;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .loading-ring,
+  #app[aria-busy="true"] .topbar::after {
+    animation: none;
+  }
+}
 main:focus {
   outline: none;
 }

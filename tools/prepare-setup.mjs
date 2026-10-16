@@ -5,6 +5,7 @@ const paths = [
   "backend/migrations/001_examengine.sql",
   "backend/migrations/002_question_images.sql",
   "backend/migrations/003_maintenance.sql",
+  "backend/migrations/004_assessment_integrity.sql",
   "work/provision.local.sql",
 ];
 let sources;

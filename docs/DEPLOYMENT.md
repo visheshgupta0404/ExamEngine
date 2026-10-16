@@ -1,6 +1,6 @@
 # ExamEngine setup and launch
 
-The application code, database migrations, local tests, and production build are prepared. A production launch is **not yet verified**: real Supabase/Google accounts, a hosting URL, and a small staging acceptance test remain necessary. The production build cannot use the local role switch.
+The app is deployed on GitHub Pages, Supabase migrations 001-004 are applied, and the Google provider is configured. Real admin/professor/student acceptance testing and institution-approved privacy/support details remain necessary before inviting students. See [the audit](AUDIT.md) and [remaining setup](USER-SETUP-CHECKLIST.md). The production build cannot use the local role switch.
 
 ## 1. Check the application
 
@@ -24,7 +24,10 @@ Apply these SQL files in order in that project's SQL editor, once each:
 1. `backend/migrations/001_examengine.sql` — application schema, authorization, and assessment RPC.
 2. `backend/migrations/002_question_images.sql` — private image bucket and access policies.
 3. `backend/migrations/003_maintenance.sql` — deadline-finalization maintenance.
-4. `work/provision.local.sql` — your ignored admin/BMU provisioning file, already generated locally.
+4. `backend/migrations/004_assessment_integrity.sql` - question privacy, input validation, and blank-answer grading.
+5. `work/provision.local.sql` — your ignored admin/BMU provisioning file, already generated locally.
+
+For the existing ExamEngine project, these migrations are already applied. Do not rerun the combined setup or provisioning. For future upgrades, apply only new migration files in order.
 
 Keep `exam_private` out of Supabase's exposed schemas. The public API exposes only the controlled `examengine` RPC and the boolean image-access helper. Never add public read policies to answer keys, attempts, or profile tables.
 

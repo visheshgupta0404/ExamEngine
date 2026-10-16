@@ -22,6 +22,8 @@ import {
   resolveImages,
 } from "./src/service.js";
 import katex from "katex";
+import { conflictingSave, latestAttempt } from "./src/sync.js";
+import { isAccessDenied } from "./src/errors.js";
 import {
   parseRoute,
   routePath,
@@ -39,6 +41,8 @@ const publicViews = new Set([
   "notFound",
 ]);
 let routeEpoch = 0;
+let renderedPath = null;
+let editorDirty = false;
 
 const app = document.querySelector("#app");
 let db = localPreview ? loadStore() : null,
@@ -55,6 +59,7 @@ let selectedQuizId = null,
   clockOffset = 0;
 let storageOK = true,
   saveError = "",
+  saveConflict = false,
   savePending = 0,
   saveChain = Promise.resolve(),
   toastTimer,
@@ -146,6 +151,10 @@ function persist() {
   return storageOK;
 }
 function applyWorkspace(data) {
+  if (db?.actorId !== data.actorId) {
+    saveConflict = false;
+    saveError = "";
+  }
   db = data;
   role = data.role || role;
   if (!localPreview) {
@@ -167,6 +176,7 @@ async function command(op, payload, localMutation) {
   } else applyWorkspace(await run(op, payload));
 }
 function go(next, id) {
+  if (view === "editor" && next !== "editor" && !leaveEditor()) return;
   view = next;
   if (id) selectedQuizId = id;
   navigatePath(pathForView(), false);
@@ -174,6 +184,15 @@ function go(next, id) {
   else void readRoute();
   document.querySelector("main")?.focus({ preventScroll: true });
   window.scrollTo(0, 0);
+}
+function leaveEditor() {
+  if (!editorDirty) return true;
+  if (
+    !window.confirm("Leave this assessment? Your unsaved changes will be lost.")
+  )
+    return false;
+  editorDirty = false;
+  return true;
 }
 function routingContext() {
   return db
@@ -248,6 +267,16 @@ function joinCodeKey(id) {
   return "examengine.join." + (db.actorId || db.identity.email) + "." + id;
 }
 async function readRoute(verified = false) {
+  if (view === "editor" && editorDirty) collectEditor();
+  if (
+    view === "editor" &&
+    editorDirty &&
+    location.pathname !== renderedPath &&
+    !leaveEditor()
+  ) {
+    navigatePath(renderedPath, true);
+    return;
+  }
   const epoch = ++routeEpoch;
   app.removeAttribute("aria-busy");
   let route = parseRoute(location.pathname, basePath);
@@ -264,9 +293,17 @@ async function readRoute(verified = false) {
       const fresh = await run("workspace");
       if (epoch !== routeEpoch) return;
       applyWorkspace(fresh);
-    } catch {
+    } catch (error) {
       if (epoch !== routeEpoch) return;
-      db = null;
+      if (isAccessDenied(error)) db = null;
+      else {
+        navigatePath(renderedPath || defaultPath(role, basePath), true);
+        view = parseRoute(location.pathname, basePath).view;
+        toast(
+          "Could not update your workspace. Check your connection and retry.",
+        );
+        return;
+      }
     } finally {
       if (epoch === routeEpoch) app.removeAttribute("aria-busy");
     }
@@ -336,8 +373,10 @@ async function readRoute(verified = false) {
   if (["result", "grading"].includes(view)) selectedAttemptId = route.id;
   if (view === "instructions")
     joinedCode = sessionStorage.getItem(joinCodeKey(route.id)) || "";
-  if (view === "editor")
+  if (view === "editor" && !editorDirty) {
     editor = route.id ? structuredClone(quizById(route.id)) : newQuiz();
+    editorDirty = false;
+  }
   if (epoch !== routeEpoch) return;
   render();
   document.querySelector("main")?.focus({ preventScroll: true });
@@ -427,7 +466,7 @@ function quizCard(q, educator = false) {
   const used = myAttempts().filter(
     (a) => a.quizId === q.id && a.status === "submitted",
   ).length;
-  return `<article class="quiz-card"><div class="assessment-symbol">${icon("book")}</div><div class="assessment-info"><div class="assessment-label"><span>${escape(q.subject || "General assessment")}</span><span class="badge ${q.published ? "green" : ""}">${escape(scheduleText(q))}</span></div><h3>${escape(q.title)}</h3>${q.description ? `<p class="muted">${escape(q.description)}</p>` : ""}<div class="quiz-meta"><span>${q.questions.length} ${q.questions.length === 1 ? "question" : "questions"}</span><span>${q.duration} minutes</span><span>${escape(q.className)}</span>${educator ? `<span class="quiz-code">${escape(q.code)}</span>` : ""}</div></div>${educator ? `<div class="actions"><button class="small" data-action="edit" data-id="${escape(q.id)}">Edit</button><button class="small ghost" data-action="preview" data-id="${escape(q.id)}">Preview</button><button class="small ghost" data-action="publish" data-id="${escape(q.id)}">${q.published ? "Unpublish" : "Publish"}</button></div>` : `<button class="${used >= q.attemptLimit ? "ghost" : "primary"}" data-action="open-quiz" data-id="${escape(q.id)}">${used >= q.attemptLimit ? "View submission" : "View assessment"} ${icon("arrow")}</button>`}</article>`;
+  return `<article class="quiz-card"><div class="assessment-symbol">${icon("book")}</div><div class="assessment-info"><div class="assessment-label"><span>${escape(q.subject || "General assessment")}</span><span class="badge ${q.published ? "green" : ""}">${escape(scheduleText(q))}</span></div><h3>${escape(q.title)}</h3>${q.description ? `<p class="muted">${escape(q.description)}</p>` : ""}<div class="quiz-meta"><span>${q.questionCount ?? q.questions.length} ${(q.questionCount ?? q.questions.length) === 1 ? "question" : "questions"}</span><span>${q.duration} minutes</span><span>${escape(q.className)}</span>${educator ? `<span class="quiz-code">${escape(q.code)}</span>` : ""}</div></div>${educator ? `<div class="actions"><button class="small" data-action="edit" data-id="${escape(q.id)}">Edit</button><button class="small ghost" data-action="preview" data-id="${escape(q.id)}">Preview</button><button class="small ghost" data-action="publish" data-id="${escape(q.id)}">${q.published ? "Unpublish" : "Publish"}</button></div>` : `<button class="${used >= q.attemptLimit ? "ghost" : "primary"}" data-action="open-quiz" data-id="${escape(q.id)}">${used >= q.attemptLimit ? "View submission" : "View assessment"} ${icon("arrow")}</button>`}</article>`;
 }
 function dashboard() {
   const quizzes = db.quizzes.filter(
@@ -483,7 +522,7 @@ function exam() {
   const q = a.quiz.questions[a.current],
     answer = a.answers[q.id],
     count = answeredCount(a);
-  return `<div class="exam-heading"><div><p class="eyebrow">${escape(a.quiz.subject || "Assessment")} / In progress</p><h1>${escape(a.quiz.title)}</h1><p class="subtext">${escape(a.identity.name)} · ${escape(a.identity.roll)}</p></div><div class="timer" role="timer" aria-label="Time remaining"><span>${a.questionDeadline ? "QUESTION TIME" : "TIME REMAINING"}</span><strong id="time-left">${formatTime(Math.max(0, Math.ceil(((a.questionDeadline || a.deadline) - now()) / 1000)))}</strong>${a.questionDeadline ? `<small>Exam: <span id="exam-time">${formatTime(remainingSeconds(a, now()))}</span></small>` : ""}</div></div><div class="exam-grid"><section class="panel question-panel"><div class="question-top"><span>Question ${a.current + 1} of ${a.quiz.questions.length}</span><span>${a.quiz.marks} ${a.quiz.marks === 1 ? "mark" : "marks"} · ${q.type === "multiple" ? "Select all that apply" : q.type === "written" ? "Written answer" : "Select one"}</span></div><fieldset><legend class="question-title" id="question-title">${rich(q.text)}</legend>${image(q)}${q.type === "written" ? `<label style="margin-top:25px">Your response<textarea id="written-answer" name="written" maxlength="10000" rows="9" placeholder="Write your answer…">${escape(answer || "")}</textarea></label><p class="subtext">Your professor will grade this response.</p>` : `<div class="options">${q.options.map((option, i) => `<label class="option ${(q.type === "multiple" ? answer?.includes(i) : answer === i) ? "selected" : ""}"><input type="${q.type === "multiple" ? "checkbox" : "radio"}" name="answer" value="${i}" ${(q.type === "multiple" ? answer?.includes(i) : answer === i) ? "checked" : ""}><span class="option-letter" aria-hidden="true">${String.fromCharCode(65 + i)}</span><span>${rich(option)}</span></label>`).join("")}</div>`}</fieldset><div class="question-footer"><div class="actions"><button class="ghost small" data-action="flag">${a.flagged.includes(q.id) ? "Marked for review" : "Mark for review"}</button><button class="ghost small" data-action="clear" ${!isAnswered(answer) ? "disabled" : ""}>Clear answer</button></div><div class="actions"><button data-action="previous" ${!navigable(a) || a.current === 0 ? "disabled" : ""}>Previous</button><button class="primary" data-action="next">${a.current === a.quiz.questions.length - 1 ? "Review & submit" : "Next question"}</button></div></div><p class="save-status" id="save-status" role="status">${escape(saveStatus())}</p><button id="retry-save" class="small" data-action="retry-save" ${saveError ? "" : "hidden"}>Retry save</button></section><aside class="panel navigator" aria-label="Question navigation"><h2>Your progress</h2><p class="subtext" id="answered-count">${count} of ${a.quiz.questions.length} answered</p><div class="progress"><span style="width:${(count / a.quiz.questions.length) * 100}%"></span></div><div class="palette">${a.quiz.questions.map((question, i) => `<button class="${isAnswered(a.answers[question.id]) ? "answered" : ""} ${a.flagged.includes(question.id) ? "flagged" : ""} ${i === a.current ? "current" : ""}" data-action="question" data-index="${i}" aria-label="Question ${i + 1}, ${isAnswered(a.answers[question.id]) ? "answered" : "unanswered"}${a.flagged.includes(question.id) ? ", marked for review" : ""}" ${!navigable(a) ? "disabled" : ""}>${i + 1}</button>`).join("")}</div><div class="legend"><span class="answered">Answered</span><span>Not answered</span><span class="flagged">For review</span></div><button class="primary" data-action="review-submit">Review & submit</button></aside></div><dialog id="submit-dialog" aria-labelledby="dialog-title"><h2 id="dialog-title">Submit your assessment?</h2><p class="muted">You cannot change responses after submission.</p><div class="dialog-counts"><div><strong>${count}</strong><span>Answered</span></div><div><strong>${a.quiz.questions.length - count}</strong><span>Unanswered</span></div><div><strong>${a.flagged.length}</strong><span>For review</span></div></div><div class="actions"><button class="primary" data-action="confirm-submit">Submit assessment</button><button data-action="close-dialog">Keep reviewing</button></div></dialog>`;
+  return `<div class="exam-heading"><div><p class="eyebrow">${escape(a.quiz.subject || "Assessment")} / In progress</p><h1>${escape(a.quiz.title)}</h1><p class="subtext">${escape(a.identity.name)} · ${escape(a.identity.roll)}</p></div><div class="timer" role="timer" aria-label="Time remaining"><span>${a.questionDeadline ? "QUESTION TIME" : "TIME REMAINING"}</span><strong id="time-left">${formatTime(Math.max(0, Math.ceil(((a.questionDeadline || a.deadline) - now()) / 1000)))}</strong>${a.questionDeadline ? `<small>Exam: <span id="exam-time">${formatTime(remainingSeconds(a, now()))}</span></small>` : ""}</div></div><div class="exam-grid"><section class="panel question-panel"><div class="question-top"><span>Question ${a.current + 1} of ${a.quiz.questions.length}</span><span>${a.quiz.marks} ${a.quiz.marks === 1 ? "mark" : "marks"} · ${q.type === "multiple" ? "Select all that apply" : q.type === "written" ? "Written answer" : "Select one"}</span></div><fieldset ${saveConflict ? "disabled" : ""}><legend class="question-title" id="question-title">${rich(q.text)}</legend>${image(q)}${q.type === "written" ? `<label style="margin-top:25px">Your response<textarea id="written-answer" name="written" maxlength="10000" rows="9" placeholder="Write your answer…">${escape(answer || "")}</textarea></label><p class="subtext">Your professor will grade this response.</p>` : `<div class="options">${q.options.map((option, i) => `<label class="option ${(q.type === "multiple" ? answer?.includes(i) : answer === i) ? "selected" : ""}"><input type="${q.type === "multiple" ? "checkbox" : "radio"}" name="answer" value="${i}" ${(q.type === "multiple" ? answer?.includes(i) : answer === i) ? "checked" : ""}><span class="option-letter" aria-hidden="true">${String.fromCharCode(65 + i)}</span><span>${rich(option)}</span></label>`).join("")}</div>`}</fieldset><div class="question-footer"><div class="actions"><button class="ghost small" data-action="flag">${a.flagged.includes(q.id) ? "Marked for review" : "Mark for review"}</button><button class="ghost small" data-action="clear" ${!isAnswered(answer) ? "disabled" : ""}>Clear answer</button></div><div class="actions"><button data-action="previous" ${!navigable(a) || a.current === 0 ? "disabled" : ""}>Previous</button><button class="primary" data-action="next">${a.current === a.quiz.questions.length - 1 ? "Review & submit" : "Next question"}</button></div></div><p class="save-status" id="save-status" role="status">${escape(saveStatus())}</p><button id="retry-save" class="small" data-action="retry-save" ${saveError ? "" : "hidden"}>Retry save</button></section><aside class="panel navigator" aria-label="Question navigation"><h2>Your progress</h2><p class="subtext" id="answered-count">${count} of ${a.quiz.questions.length} answered</p><div class="progress"><span style="width:${(count / a.quiz.questions.length) * 100}%"></span></div><div class="palette">${a.quiz.questions.map((question, i) => `<button class="${isAnswered(a.answers[question.id]) ? "answered" : ""} ${a.flagged.includes(question.id) ? "flagged" : ""} ${i === a.current ? "current" : ""}" data-action="question" data-index="${i}" aria-label="Question ${i + 1}, ${isAnswered(a.answers[question.id]) ? "answered" : "unanswered"}${a.flagged.includes(question.id) ? ", marked for review" : ""}" ${!navigable(a) ? "disabled" : ""}>${i + 1}</button>`).join("")}</div><div class="legend"><span class="answered">Answered</span><span>Not answered</span><span class="flagged">For review</span></div><button class="primary" data-action="review-submit">Review & submit</button></aside></div><dialog id="submit-dialog" aria-labelledby="dialog-title"><h2 id="dialog-title">Submit your assessment?</h2><p class="muted">You cannot change responses after submission.</p><div class="dialog-counts"><div><strong>${count}</strong><span>Answered</span></div><div><strong>${a.quiz.questions.length - count}</strong><span>Unanswered</span></div><div><strong>${a.flagged.length}</strong><span>For review</span></div></div><div class="actions"><button class="primary" data-action="confirm-submit">Submit assessment</button><button data-action="close-dialog">Keep reviewing</button></div></dialog>`;
 }
 function answerText(q, answer) {
   return q.type === "written"
@@ -716,6 +755,7 @@ function render() {
     return;
   }
   navigatePath(currentPath, true);
+  renderedPath = currentPath;
   const nav =
     role === "student"
       ? [
@@ -800,7 +840,10 @@ function updateSaveStatus() {
   const e = document.querySelector("#save-status");
   if (e) e.textContent = saveStatus();
   const retry = document.querySelector("#retry-save");
-  if (retry) retry.hidden = !saveError;
+  if (retry) {
+    retry.hidden = !saveError;
+    retry.textContent = saveConflict ? "Refresh saved answers" : "Retry save";
+  }
 }
 function cacheDraft(a) {
   if (localPreview) {
@@ -817,6 +860,7 @@ function cacheDraft(a) {
         current: a.current,
         revision: a.revision,
         deadline: a.deadline,
+        conflict: saveConflict,
       }),
     );
   } catch {
@@ -828,6 +872,8 @@ function queueSave(a) {
     persist();
     return;
   }
+  if (saveConflict || !db || a.userId !== db.actorId) return;
+  const actorId = db.actorId;
   cacheDraft(a);
   const payload = {
     attemptId: a.id,
@@ -840,11 +886,17 @@ function queueSave(a) {
   updateSaveStatus();
   saveChain = saveChain
     .then(async () => {
+      if (saveConflict || !db || db.actorId !== actorId) return;
       const response = await run("save", payload);
-      if (response.revision > payload.revision)
+      if (!db || db.actorId !== actorId) return;
+      if (conflictingSave(response, payload)) {
+        saveConflict = true;
+        cacheDraft(a);
+        render();
         throw new Error(
-          "A newer response exists in another tab. Refresh before editing further.",
+          "Another tab saved different responses. Refresh saved answers to continue.",
         );
+      }
       saveError = "";
       if (response.attempts) {
         applyWorkspace(response);
@@ -861,6 +913,7 @@ function queueSave(a) {
       }
     })
     .catch((error) => {
+      if (!db || db.actorId !== actorId) return;
       saveError = error.message;
       toast("Answer save failed. Your browser draft is retained.");
     })
@@ -934,6 +987,10 @@ async function advance() {
       applyResponse(
         await run("advance", { attemptId: a.id, current: a.current }),
       );
+    if (!activeAttempt()) {
+      selectedAttemptId = a.id;
+      view = "result";
+    }
     render();
   } catch (e) {
     toast(e.message);
@@ -1030,9 +1087,12 @@ async function refresh() {
   if (localPreview) return;
   await saveChain;
   applyWorkspace(await run("workspace"));
+  saveConflict = false;
+  saveError = "";
   render();
 }
 app.addEventListener("input", (event) => {
+  if (event.target.closest("#editor-form")) editorDirty = true;
   if (event.target.name === "written") {
     if (!guardDeadline()) return;
     const a = activeAttempt();
@@ -1060,6 +1120,7 @@ app.addEventListener("input", (event) => {
   }
 });
 app.addEventListener("change", async (event) => {
+  if (event.target.closest("#editor-form")) editorDirty = true;
   try {
     if (event.target.dataset.imageUpload !== undefined) {
       const file = event.target.files[0];
@@ -1089,12 +1150,20 @@ app.addEventListener("change", async (event) => {
     }
     if (event.target.id === "role") {
       if (activeAttempt()) return;
+      if (view === "editor" && !leaveEditor()) {
+        event.target.value = role;
+        return;
+      }
       role = event.target.value;
       sessionStorage.setItem("examengine.previewRole", role);
       editor = null;
       go("dashboard");
     }
     if (event.target.id === "professor-account") {
+      if (view === "editor" && !leaveEditor()) {
+        event.target.value = professorId;
+        return;
+      }
       professorId = event.target.value;
       editor = null;
       go("dashboard");
@@ -1175,7 +1244,6 @@ app.addEventListener("click", async (event) => {
       ].includes(action)
     ) {
       if (activeAttempt()) return;
-      editor = null;
       go(action);
     } else if (action === "refresh") await refresh();
     else if (action === "open-quiz") {
@@ -1184,7 +1252,7 @@ app.addEventListener("click", async (event) => {
           (a) => a.quizId === id && a.status === "submitted",
         );
       if (attempts.length >= q.attemptLimit) {
-        selectedAttemptId = attempts.at(-1).id;
+        selectedAttemptId = latestAttempt(attempts).id;
         go("result");
       } else {
         joinedCode = "";
@@ -1221,6 +1289,7 @@ app.addEventListener("click", async (event) => {
       render();
       toast("Publication updated.");
     } else if (action === "add-question" || action === "remove-question") {
+      editorDirty = true;
       collectEditor();
       if (action === "add-question") editor.questions.push(newQuestion());
       else editor.questions.splice(Number(el.dataset.index), 1);
@@ -1234,6 +1303,7 @@ app.addEventListener("click", async (event) => {
       );
       render();
     } else if (action === "remove-image") {
+      editorDirty = true;
       collectEditor();
       const q = editor.questions[Number(el.dataset.index)];
       q.image = "";
@@ -1252,6 +1322,10 @@ app.addEventListener("click", async (event) => {
           : "examengine-backup.json",
       );
     } else if (action === "retry-save") {
+      if (saveConflict) {
+        await refresh();
+        return;
+      }
       const a = activeAttempt();
       if (a) {
         queueSave(a);
@@ -1424,6 +1498,7 @@ app.addEventListener("submit", async (event) => {
           await run("roster", { quizId: saved.id, rows: saved.roster }),
         );
       editor = null;
+      editorDirty = false;
       go("dashboard");
       toast("Assessment saved.");
     } else if (form.id === "grade-form") {
@@ -1658,6 +1733,7 @@ async function bootstrap() {
           localStorage.getItem("examengine.draft." + db.actorId),
         );
         if (
+          !draft?.conflict &&
           draft?.attemptId === a.id &&
           draft.revision >= a.revision &&
           a.deadline > now()
@@ -1703,6 +1779,8 @@ client?.auth.onAuthStateChange((event, session) => {
   if (event === "SIGNED_OUT") {
     routeEpoch++;
     db = null;
+    editor = null;
+    editorDirty = false;
     navigatePath(routePath(null, "signin", null, basePath), true);
     renderGate(
       "Welcome to ExamEngine",
@@ -1730,4 +1808,17 @@ setInterval(async () => {
 }, 60000);
 setInterval(tick, 1000);
 window.addEventListener("popstate", () => void readRoute());
+window.addEventListener("beforeunload", (event) => {
+  if (editorDirty) {
+    event.preventDefault();
+    event.returnValue = "";
+  }
+});
+document.querySelector(".skip-link")?.addEventListener("click", (event) => {
+  event.preventDefault();
+  const main = document.querySelector("main");
+  main?.setAttribute("tabindex", "-1");
+  main?.focus();
+  main?.scrollIntoView({ block: "start" });
+});
 void bootstrap();

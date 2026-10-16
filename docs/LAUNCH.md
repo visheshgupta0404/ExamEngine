@@ -1,6 +1,6 @@
 # Finish the first live setup
 
-The application is on `main`. This guide uses the existing GitHub Pages address to avoid adding a hosting account. Real student use still requires the acceptance checks below and institution-approved privacy/support details.
+The application is on `main`. The existing Supabase project, Google provider, and GitHub Pages deployment are configured; migrations 001-004 are applied. The creation steps below are for a new installation, and must not be repeated on the current database. See [remaining setup](USER-SETUP-CHECKLIST.md). This guide uses the existing GitHub Pages address to avoid adding a hosting account. Real student use still requires the acceptance checks below and institution-approved privacy/support details.
 
 ## 1. Create the backend
 
@@ -12,7 +12,7 @@ In the local repo run:
 npm run setup:prepare
 ```
 
-This prepares **ignored, private** `work/setup.local.sql` from the three migrations and your existing admin/BMU provisioning file. In the new project's SQL editor, paste and run this file once. It is for an empty project only. Use the combined file **or** the individual migration sequence, never both. If a section fails, stop and inspect the error before retrying: earlier sections may already be committed.
+This prepares **ignored, private** `work/setup.local.sql` from the four migrations and your existing admin/BMU provisioning file. In the new project's SQL editor, paste and run this file once. It is for an empty project only. Use the combined file **or** the individual migration sequence, never both. If a section fails, stop and inspect the error before retrying: earlier sections may already be committed.
 
 Keep `exam_private` out of the exposed API schemas. Copy the project URL and **publishable** API key from the project settings. These browser-safe values are the only backend values the frontend needs.
 

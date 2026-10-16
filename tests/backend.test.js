@@ -32,6 +32,9 @@ test("production PostgreSQL migration and authorization workflows", async (t) =>
     await pg.exec(
       await readFile("backend/migrations/003_maintenance.sql", "utf8"),
     );
+    await pg.exec(
+      await readFile("backend/migrations/004_assessment_integrity.sql", "utf8"),
+    );
     for (const [name, id] of Object.entries(users)) {
       const email = {
         admin: "admin@gmail.com",
@@ -132,13 +135,22 @@ test("production PostgreSQL migration and authorization workflows", async (t) =>
         });
         assert.equal(w.identity.email, "student@bmu.edu.in");
         assert.equal(w.role, "student");
-        assert.equal(w.quizzes[0].questions[0].correctOption, undefined);
-        assert.equal(w.quizzes[0].questions[0].correctOptions, undefined);
+        assert.equal(w.quizzes[0].questions.length, 0);
+        assert.equal(w.quizzes[0].questionCount, quiz.questions.length);
+        assert.equal(
+          JSON.stringify(w.quizzes).includes(quiz.questions[0].text),
+          false,
+        );
         w = await rpc("start", { quizId: quiz.id });
         attemptId = w.attempts[0].id;
+        assert.equal(
+          w.attempts[0].quiz.questions.length,
+          quiz.questions.length,
+        );
         assert.equal(w.attempts[0].userId, users.student);
         const metadata = await rpc("quiz", { quizId: quiz.id });
-        assert.equal(metadata.questions[0].correctOption, undefined);
+        assert.equal(metadata.questions.length, 0);
+        assert.equal(metadata.questionCount, quiz.questions.length);
         const retry = await rpc("start", { quizId: quiz.id });
         assert.equal(retry.attempts.length, 1);
         assert.equal(retry.attempts[0].id, attemptId);
@@ -198,7 +210,8 @@ test("production PostgreSQL migration and authorization workflows", async (t) =>
           code: codeQuiz.code,
         });
         assert.equal(q.id, codeQuiz.id);
-        assert.equal(q.questions[0].correctOption, undefined);
+        assert.equal(q.questions.length, 0);
+        assert.equal(q.questionCount, quiz.questions.length);
         assert.equal(
           (await rpc("quiz", { quizId: rosterQuiz.id })).id,
           rosterQuiz.id,
@@ -533,6 +546,83 @@ test("production PostgreSQL migration and authorization workflows", async (t) =>
         await as("student");
         response = await pg.query("select * from storage.objects");
         assert.equal(response.rows.length, 1);
+      },
+    );
+    await t.test(
+      "server rejects malformed quiz arrays and fractional question timers",
+      async () => {
+        await as("professor");
+        const malformed = { ...quiz, id: "bad-input", questions: undefined };
+        await assert.rejects(rpc("saveQuiz", { quiz: malformed }), /questions/);
+        await assert.rejects(
+          rpc("saveQuiz", { quiz: { ...quiz, perQuestionSeconds: 1.5 } }),
+          /rules/,
+        );
+        await assert.rejects(
+          rpc("saveQuiz", {
+            quiz: {
+              ...quiz,
+              questions: [
+                {
+                  id: "missing-answers",
+                  type: "multiple",
+                  text: "Choose",
+                  options: ["A", "B"],
+                },
+              ],
+            },
+          }),
+          /correct answers/,
+        );
+      },
+    );
+    await t.test(
+      "whitespace-only written responses count as unanswered without pending grading",
+      async () => {
+        await as("professor");
+        const written = {
+          ...quiz,
+          id: "blank-written",
+          code: "BLANK-101",
+          release: true,
+          questions: [{ id: "essay", type: "written", text: "Explain." }],
+        };
+        await rpc("saveQuiz", { quiz: written });
+        await rpc("publish", { quizId: written.id, published: true });
+        await as("student");
+        let w = await rpc("start", { quizId: written.id });
+        const a = w.attempts.find((x) => x.quizId === written.id);
+        await rpc("save", {
+          attemptId: a.id,
+          answers: { essay: " \n\t " },
+          flagged: [],
+          current: 0,
+          revision: 1,
+        });
+        w = await rpc("submit", { attemptId: a.id });
+        const result = w.attempts.find((x) => x.id === a.id).result;
+        assert.equal(result.unanswered, 1);
+        assert.equal(result.pendingManual, 0);
+        assert.equal(result.score, 0);
+      },
+    );
+    await t.test(
+      "integrity upgrade preserves populated attempt records",
+      async () => {
+        await pg.exec("reset role");
+        const before = await pg.query(
+          "select jsonb_agg(to_jsonb(a) order by id) as records from exam_private.attempts a",
+        );
+        await pg.exec(
+          await readFile(
+            "backend/migrations/004_assessment_integrity.sql",
+            "utf8",
+          ),
+        );
+        const after = await pg.query(
+          "select jsonb_agg(to_jsonb(a) order by id) as records from exam_private.attempts a",
+        );
+        assert.deepEqual(after.rows, before.rows);
       },
     );
     await t.test(

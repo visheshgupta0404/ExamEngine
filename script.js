@@ -340,11 +340,28 @@ async function readRoute(verified = false) {
   document.querySelector("main")?.focus({ preventScroll: true });
   window.scrollTo(0, 0);
 }
+function icon(name) {
+  const paths = {
+    dashboard:
+      '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+    history: '<path d="M8 3h8l4 4v14H4V3h4Zm8 0v5h4M8 12h8M8 16h5"/>',
+    profile:
+      '<circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/>',
+    submissions: '<path d="M9 4H4v17h16V4h-5M9 3h6v4H9zM8 13l2 2 6-6"/>',
+    professors:
+      '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2m20 0v-2a4 4 0 0 0-3-3.9M15 3a4 4 0 0 1 0 8"/><circle cx="9" cy="7" r="4"/>',
+    audit: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
+    arrow: '<path d="M5 12h14m-6-6 6 6-6 6"/>',
+    lock: '<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
+    book: '<path d="M12 5C8 2 4 3 2 4v15c4-2 7-1 10 1 3-2 6-3 10-1V4c-2-1-6-2-10 1Zm0 0v15"/>',
+  };
+  return `<svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.dashboard}</svg>`;
+}
 function heading(title, description, action = "") {
   return `<div class="page-heading"><div><p class="eyebrow">${escape(role === "student" ? college().name + " / Student workspace" : role === "professor" ? "Educator workspace" : "Platform management")}</p><h1>${escape(title)}</h1><p class="muted">${escape(description)}</p></div>${action}</div>`;
 }
 function stat(label, value) {
-  return `<div class="stat"><span>${escape(label)}</span><strong>${escape(value)}</strong></div>`;
+  return `<div class="stat${label === "Your class" ? " text-stat" : ""}"><span>${escape(label)}</span><strong>${escape(value)}</strong></div>`;
 }
 function empty(text) {
   return `<div class="empty">${escape(text)}</div>`;
@@ -407,7 +424,7 @@ function quizCard(q, educator = false) {
   const used = myAttempts().filter(
     (a) => a.quizId === q.id && a.status === "submitted",
   ).length;
-  return `<article class="quiz-card"><div><span class="badge ${q.published ? "green" : ""}">${escape(scheduleText(q))}</span><h3>${escape(q.title)}</h3><p class="muted">${escape(q.description)}</p><div class="quiz-meta"><span>${escape(q.subject || "General")}</span><span>${q.questions.length} questions</span><span>${q.duration} minutes</span><span>${escape(q.className)}</span>${educator ? `<span>Code: ${escape(q.code)}</span>` : ""}</div></div>${educator ? `<div class="actions"><button class="small" data-action="edit" data-id="${escape(q.id)}">Edit</button><button class="small" data-action="preview" data-id="${escape(q.id)}">Preview</button><button class="small" data-action="publish" data-id="${escape(q.id)}">${q.published ? "Unpublish" : "Publish"}</button></div>` : `<button class="${used >= q.attemptLimit ? "ghost" : "primary"}" data-action="open-quiz" data-id="${escape(q.id)}">${used >= q.attemptLimit ? "View submission" : "View assessment"} →</button>`}</article>`;
+  return `<article class="quiz-card"><div class="assessment-symbol">${icon("book")}</div><div class="assessment-info"><div class="assessment-label"><span>${escape(q.subject || "General assessment")}</span><span class="badge ${q.published ? "green" : ""}">${escape(scheduleText(q))}</span></div><h3>${escape(q.title)}</h3>${q.description ? `<p class="muted">${escape(q.description)}</p>` : ""}<div class="quiz-meta"><span>${q.questions.length} ${q.questions.length === 1 ? "question" : "questions"}</span><span>${q.duration} minutes</span><span>${escape(q.className)}</span>${educator ? `<span class="quiz-code">${escape(q.code)}</span>` : ""}</div></div>${educator ? `<div class="actions"><button class="small" data-action="edit" data-id="${escape(q.id)}">Edit</button><button class="small ghost" data-action="preview" data-id="${escape(q.id)}">Preview</button><button class="small ghost" data-action="publish" data-id="${escape(q.id)}">${q.published ? "Unpublish" : "Publish"}</button></div>` : `<button class="${used >= q.attemptLimit ? "ghost" : "primary"}" data-action="open-quiz" data-id="${escape(q.id)}">${used >= q.attemptLimit ? "View submission" : "View assessment"} ${icon("arrow")}</button>`}</article>`;
 }
 function dashboard() {
   const quizzes = db.quizzes.filter(
@@ -504,7 +521,7 @@ function history() {
 }
 function professorDashboard() {
   const picker = localPreview
-    ? `<div class="panel"><label>Preview professor account<select id="professor-account">${db.professors
+    ? `<div class="preview-selector"><label>Preview professor account<select id="professor-account">${db.professors
         .filter((p) => p.status === "approved")
         .map(
           (p) =>
@@ -734,7 +751,7 @@ function render() {
             }[view] || professorDashboard
           )()
         : admin();
-  app.innerHTML = `<div class="shell"><aside class="sidebar"><a href="${defaultPath(role, basePath)}" class="brand" data-action="dashboard"><span class="brand-mark">E</span>ExamEngine</a><div class="workspace-label">Workspace</div><nav class="nav" aria-label="Main navigation">${nav.map(([id, title]) => `<a href="${routePath(role, id, null, basePath)}" data-action="${id}" class="${id === view ? "active" : ""}" ${a ? 'aria-disabled="true"' : ""}>${title}</a>`).join("")}</nav><div class="sidebar-bottom">${localPreview ? `<label class="role-label" for="role">Preview workspace</label><select id="role" aria-label="Preview workspace" ${a ? "disabled" : ""}>${["student", "professor", "admin"].map((r) => `<option value="${r}" ${r === role ? "selected" : ""}>${r[0].toUpperCase() + r.slice(1)} preview</option>`).join("")}</select>` : `<button class="ghost small" data-action="refresh">Refresh workspace</button><button class="ghost small" data-action="signout">Sign out</button>`}<p class="sidebar-note">Focused assessments.<br>Built for learning.</p><button class="ghost small" data-action="privacy">Privacy information</button></div></aside><div class="content"><header class="topbar"><span class="topbar-label">${escape(role === "admin" ? "Platform administration" : (role === "professor" ? professorCollege() : college()).name + " / " + role)}</span><div class="profile">${localPreview ? '<span class="badge">Local preview</span>' : ""}<span class="profile-name">${escape(person)}</span><span class="avatar">${escape(
+  app.innerHTML = `<div class="shell ${view === "exam" ? "exam-shell" : ""}"><aside class="sidebar"><a href="${defaultPath(role, basePath)}" class="brand" data-action="dashboard"><span class="brand-mark">${icon("book")}</span>ExamEngine</a><div class="workspace-label">${role === "student" ? "Learning workspace" : role === "professor" ? "Teaching workspace" : "Administration"}</div><nav class="nav" aria-label="Main navigation">${nav.map(([id, title]) => `<a href="${routePath(role, id, null, basePath)}" data-action="${id}" class="${id === view ? "active" : ""}" ${id === view ? 'aria-current="page"' : ""} ${a ? 'aria-disabled="true"' : ""}>${icon(id)}<span>${title}</span></a>`).join("")}</nav><div class="sidebar-bottom">${localPreview ? `<label class="role-label" for="role">Preview workspace</label><select id="role" aria-label="Preview workspace" ${a ? "disabled" : ""}>${["student", "professor", "admin"].map((r) => `<option value="${r}" ${r === role ? "selected" : ""}>${r[0].toUpperCase() + r.slice(1)} preview</option>`).join("")}</select>` : `<button class="ghost small" data-action="refresh">Refresh workspace</button><button class="ghost small" data-action="signout">Sign out</button>`}<p class="sidebar-note">ExamEngine<br><span>Assessment workspace</span></p><button class="ghost small" data-action="privacy">Privacy information</button></div></aside><div class="content"><header class="topbar">${view === "exam" ? `<span class="brand exam-brand">${icon("book")}ExamEngine</span>` : ""}<span class="topbar-label">${escape(role === "admin" ? "Platform administration" : (role === "professor" ? professorCollege() : college()).name + " / " + role)}</span><div class="profile">${localPreview ? '<span class="badge">Local preview</span>' : ""}<span class="profile-name">${escape(person)}</span><span class="avatar">${escape(
     person
       .split(" ")
       .map((s) => s[0])
@@ -744,8 +761,9 @@ function render() {
   tick();
 }
 function renderGate(title, message, signin = false) {
-  app.innerHTML = `<main id="main" class="auth-page"><a class="brand" href="${db ? defaultPath(role, basePath) : routePath(null, "signin", null, basePath)}" data-action="home"><span class="brand-mark">E</span>ExamEngine</a><div class="panel"><p class="eyebrow">Focused college assessments</p><h1>${escape(title)}</h1><p class="muted">${escape(message)}</p>${signin ? '<button class="primary" data-action="signin">Continue with Google</button>' : ""}<p class="error" id="form-error" role="alert"></p><p class="subtext">Student accounts require an approved college email domain. Professor access is approved by an administrator.</p><button class="ghost small" data-action="privacy">Privacy information</button></div></main>`;
+  app.innerHTML = `<main id="main" class="auth-page"><section class="auth-story" aria-label="About ExamEngine"><a class="brand" href="${db ? defaultPath(role, basePath) : routePath(null, "signin", null, basePath)}" data-action="home"><span class="brand-mark">${icon("book")}</span>ExamEngine</a><div class="auth-story-body"><p class="eyebrow">THE ASSESSMENT WORKSPACE</p><h2>A focused space <br>to do your best.</h2><p>From the first question to the final submission. A clear, considered assessment experience for students and educators.</p><div class="assessment-preview" aria-hidden="true"><div class="preview-top"><span>ASSESSMENT IN PROGRESS</span><span>08:42</span></div><div class="preview-progress"><i></i></div><span class="preview-label">QUESTION 04 / 10</span><p>Great questions deserve<br>your full attention.</p><div class="preview-option"><span>A</span><i></i><b>✓</b></div><div class="preview-option"><span>B</span><i></i></div><div class="preview-bottom"><span>Response saved</span><span>Next question →</span></div></div></div><div class="auth-story-footer"><span>Built around learning.</span><span>01 — EXAMENGINE</span></div></section><section class="auth-entry"><div class="auth-entry-top">STUDENTS & EDUCATORS <span>ACCOUNT ACCESS</span></div><div class="panel auth-card"><div class="auth-lock">${icon("lock")}</div><p class="eyebrow">YOUR WORKSPACE AWAITS</p><h1>${escape(title === "Welcome to ExamEngine" ? "Welcome back." : title)}</h1><p class="muted auth-message">${escape(signin && title === "Welcome to ExamEngine" ? "Sign in to access your assessments, submissions, and results." : message)}</p>${signin ? `<button class="google-signin" data-action="signin"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path fill="#4285F4" d="M21.6 12.2c0-.7-.1-1.4-.2-2.1H12v4h5.4a4.6 4.6 0 0 1-2 3v2.5h3.3c1.9-1.7 2.9-4.2 2.9-7.4Z"/><path fill="#34A853" d="M12 22c2.7 0 5-.9 6.7-2.4l-3.3-2.5c-.9.6-2 1-3.4 1a6 6 0 0 1-5.7-4.2H2.9v2.6A10 10 0 0 0 12 22Z"/><path fill="#FBBC05" d="M6.3 13.9a6 6 0 0 1 0-3.8V7.5H2.9a10 10 0 0 0 0 9l3.4-2.6Z"/><path fill="#EA4335" d="M12 5.9c1.5 0 2.8.5 3.9 1.5l2.9-2.9A9.7 9.7 0 0 0 12 2a10 10 0 0 0-9.1 5.5l3.4 2.6A6 6 0 0 1 12 5.9Z"/></svg>Continue with Google ${icon("arrow")}</button>` : ""}<p class="error" id="form-error" role="alert"></p><div class="access-note">${icon("lock")}<p>Use your college or approved educator account.<br>Your institution manages workspace access.</p></div><button class="privacy-link" data-action="privacy">Privacy & account information ${icon("arrow")}</button></div><footer class="auth-entry-footer"><span>ExamEngine © ${new Date().getFullYear()}</span><span>Focus on what you know.</span></footer></section></main>`;
 }
+
 function collectIdentity(form, forced) {
   const f = new FormData(form);
   return {

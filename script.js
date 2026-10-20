@@ -21,7 +21,92 @@ import {
   uploadImage,
   resolveImages,
 } from "./src/service.js";
-import katex from "katex";
+import { prepareMath, renderEquation } from "./src/math.js";
+import {
+  readDraft,
+  writeDraft,
+  removeDraft,
+  clearEditorDrafts,
+} from "./src/drafts.js";
+import { importQuestions, questionTemplate } from "./src/import.js";
+import { paginate, searchItems } from "./src/lists.js";
+let draftTimer,
+  pendingEditorFields = null,
+  recoveredEditor = false;
+const listState = new Map();
+function listPage(key, items, text) {
+  const state = listState.get(key) || { page: 1, query: "" };
+  listState.set(key, state);
+  const result = paginate(searchItems(items, state.query, text), state.page);
+  state.page = result.page;
+  return { ...result, query: state.query };
+}
+function listControls(key, p) {
+  return `<form class="list-controls" data-list-search="${key}"><label>Search ${key}<input name="query" type="search" maxlength="100" value="${escape(p.query)}" placeholder="Search by name, subject or class"></label><button>Search</button></form><nav class="pagination" aria-label="${key} pages"><span role="status">${p.start}-${p.end} of ${p.total}</span><div class="actions"><button data-action="list-page" data-list="${key}" data-page="${p.page - 1}" ${p.page === 1 ? "disabled" : ""}>Previous</button><span>Page ${p.page} of ${p.pages}</span><button data-action="list-page" data-list="${key}" data-page="${p.page + 1}" ${p.page === p.pages ? "disabled" : ""}>Next</button></div></nav>`;
+}
+function editorScope() {
+  return [
+    localPreview ? "preview" : "live",
+    db?.actorId || professorId,
+    professorId,
+    professorCollege()?.id,
+  ].join(":");
+}
+function editorRoute() {
+  return quizById(editor?.id) ? editor.id : "new";
+}
+function saveEditorRecovery() {
+  clearTimeout(draftTimer);
+  if (!editorDirty || !editor || view !== "editor") return;
+  const form = document.querySelector("#editor-form");
+  if (!form) return;
+  try {
+    const fields = [...new FormData(form)].filter(
+      ([, v]) => typeof v === "string",
+    );
+    writeDraft(sessionStorage, editorScope(), editorRoute(), editor, fields);
+    const status = document.querySelector("#editor-recovery-status");
+    if (status)
+      status.textContent =
+        (recoveredEditor ? "Recovered your unsaved assessment. " : "") +
+        "Recovery copy saved in this tab. Save assessment to store it online.";
+  } catch {
+    const status = document.querySelector("#editor-recovery-status");
+    if (status)
+      status.textContent =
+        "Recovery copy unavailable. Keep this tab open and save your assessment.";
+  }
+}
+function restoreEditorRecovery() {
+  const d = readDraft(sessionStorage, editorScope(), editorRoute());
+  if (
+    d &&
+    d.editor.collegeId === editor.collegeId &&
+    d.editor.professorId === editor.professorId
+  ) {
+    editor = d.editor;
+    pendingEditorFields = d.fields;
+    editorDirty = true;
+    recoveredEditor = true;
+  }
+}
+function restoreEditorFields() {
+  if (!pendingEditorFields) return;
+  const form = document.querySelector("#editor-form");
+  if (!form) return;
+  const fields = pendingEditorFields;
+  pendingEditorFields = null;
+  for (const el of form.elements) {
+    if (!el.name || ["file", "submit", "button"].includes(el.type)) continue;
+    if (el.type === "checkbox" || el.type === "radio")
+      el.checked = fields.some(([k, v]) => k === el.name && v === el.value);
+    else {
+      const value = fields.find(([k]) => k === el.name);
+      if (value) el.value = value[1];
+    }
+  }
+}
+
 import { conflictingSave, latestAttempt } from "./src/sync.js";
 import { isAccessDenied } from "./src/errors.js";
 import {
@@ -119,7 +204,7 @@ function rich(text) {
     .split(/(\$\$[\s\S]*?\$\$|\$[^$\n]+\$)/g)
     .map((part) =>
       part.startsWith("$") && part.endsWith("$")
-        ? katex.renderToString(
+        ? renderEquation(
             part.slice(
               part.startsWith("$$") ? 2 : 1,
               part.startsWith("$$") ? -2 : -1,
@@ -152,6 +237,7 @@ function persist() {
 }
 function applyWorkspace(data) {
   if (db?.actorId !== data.actorId) {
+    listState.clear();
     saveConflict = false;
     saveError = "";
   }
@@ -173,6 +259,7 @@ async function command(op, payload, localMutation) {
   if (localPreview) {
     localMutation?.();
     persist();
+    await prepareMath(db);
   } else applyWorkspace(await run(op, payload));
 }
 function go(next, id) {
@@ -181,14 +268,17 @@ function go(next, id) {
   if (id) selectedQuizId = id;
   navigatePath(pathForView(), false);
   if (localPreview) render();
-  else void readRoute();
+  else return readRoute();
   document.querySelector("main")?.focus({ preventScroll: true });
   window.scrollTo(0, 0);
 }
 function leaveEditor() {
   if (!editorDirty) return true;
+  saveEditorRecovery();
   if (
-    !window.confirm("Leave this assessment? Your unsaved changes will be lost.")
+    !window.confirm(
+      "Leave this assessment? Your changes are not saved online. A recovery copy may be available in this tab.",
+    )
   )
     return false;
   editorDirty = false;
@@ -267,7 +357,14 @@ function joinCodeKey(id) {
   return "examengine.join." + (db.actorId || db.identity.email) + "." + id;
 }
 async function readRoute(verified = false) {
-  if (view === "editor" && editorDirty) collectEditor();
+  if (view === "editor" && editorDirty) {
+    saveEditorRecovery();
+    pendingEditorFields =
+      readDraft(sessionStorage, editorScope(), editorRoute())?.fields || null;
+    try {
+      collectEditor();
+    } catch {}
+  }
   if (
     view === "editor" &&
     editorDirty &&
@@ -376,7 +473,14 @@ async function readRoute(verified = false) {
   if (view === "editor" && !editorDirty) {
     editor = route.id ? structuredClone(quizById(route.id)) : newQuiz();
     editorDirty = false;
+    recoveredEditor = false;
+    pendingEditorFields = null;
+    restoreEditorRecovery();
   }
+  if (!(await prepareMath(db)))
+    toast(
+      "Equation formatting could not load. Plain equation text is shown; refresh to retry.",
+    );
   if (epoch !== routeEpoch) return;
   render();
   document.querySelector("main")?.focus({ preventScroll: true });
@@ -476,13 +580,16 @@ function dashboard() {
       q.className.toLowerCase() === db.identity.className.toLowerCase() &&
       q.joinMode !== "code",
   );
+  const page = listPage("assessments", quizzes, (q) =>
+    [q.title, q.subject, q.className].join(" "),
+  );
   return (
     heading(
       "Your assessments",
       "A clear space to prepare, take your quizzes, and track your progress.",
       '<button class="ghost" data-action="profile">Student details</button>',
     ) +
-    `<div class="stats">${stat("Assigned assessments", quizzes.length)}${stat("Completed attempts", myAttempts().filter((a) => a.status === "submitted").length)}${stat("Your class", db.identity.className || "Complete your details")}</div><div class="section-heading"><h2>Assigned to you</h2><span class="subtext">${escape(college().name)}</span></div><div class="quiz-list">${quizzes.map((q) => quizCard(q)).join("") || empty("No assessments assigned to this class yet. Complete your details or join with a quiz code.")}</div><div class="join-panel"><div><h3>Have a quiz code?</h3><p class="muted">Enter the code shared by your professor.${localPreview ? " Sample: WEB-101." : ""}</p></div><form id="join-form" class="inline-form"><label class="sr-only" for="quiz-code">Quiz code</label><input id="quiz-code" name="code" maxlength="20" placeholder="Enter quiz code" required><button>Join quiz</button></form></div>`
+    `<div class="stats">${stat("Assigned assessments", quizzes.length)}${stat("Completed attempts", myAttempts().filter((a) => a.status === "submitted").length)}${stat("Your class", db.identity.className || "Complete your details")}</div><div class="section-heading"><h2>Assigned to you</h2><span class="subtext">${escape(college().name)}</span></div>${listControls("assessments", page)}<div class="quiz-list">${page.items.map((q) => quizCard(q)).join("") || empty("No assessments assigned to this class yet. Complete your details or join with a quiz code.")}</div><div class="join-panel"><div><h3>Have a quiz code?</h3><p class="muted">Enter the code shared by your professor.${localPreview ? " Sample: WEB-101." : ""}</p></div><form id="join-form" class="inline-form"><label class="sr-only" for="quiz-code">Quiz code</label><input id="quiz-code" name="code" maxlength="20" placeholder="Enter quiz code" required><button>Join quiz</button></form></div>`
   );
 }
 function identityFields(identity, forcedCollege) {
@@ -502,7 +609,7 @@ function instructions() {
   if (!q) return empty("Assessment unavailable.");
   return (
     heading(q.title, q.description) +
-    `<section class="panel narrow"><h2>Before you begin</h2><dl class="rules"><div><dt>Questions</dt><dd>${q.questions.length} · ${q.questions.some((i) => i.type === "written") ? "includes written answers" : "objective assessment"}</dd></div><div><dt>Time limit</dt><dd>${q.duration} minutes${q.perQuestionSeconds ? " · " + q.perQuestionSeconds + " seconds per question" : ""}</dd></div><div><dt>Marking</dt><dd>${q.marks} per correct answer · ${q.penalty ? "−" + q.penalty + " per wrong answer" : "no negative marking"}</dd></div><div><dt>Attempts</dt><dd>${q.attemptLimit}</dd></div><div><dt>Navigation</dt><dd>${q.perQuestionSeconds || q.allowNavigation === false ? "Forward only; previous answers lock" : "Return to questions freely"}</dd></div><div><dt>Results</dt><dd>${q.release ? "After submission and any manual grading" : "Released by your professor"}</dd></div></dl><p class="muted">The timer continues when you leave or refresh. Saved answers are submitted when the deadline ends. Multiple-choice questions require all correct selections for full marks.</p>${q.closesAt ? `<p class="subtext">Closes ${escape(fmtDate(q.closesAt))}. Your deadline will not extend beyond closing time.</p>` : ""}</section><form id="start-form" class="panel narrow"><h2>Confirm your details</h2>${identityFields({ ...db.identity, className: db.identity.className || q.className }, q.collegeId)}<label class="check-label" style="margin-top:25px"><input type="checkbox" required name="ready">I have read the instructions and am ready.</label><p id="form-error" class="error" role="alert"></p><div class="actions"><button class="primary">Start assessment</button><button type="button" data-action="dashboard">Back</button></div></form>`
+    `<section class="panel narrow"><h2>Before you begin</h2><dl class="rules"><div><dt>Questions</dt><dd>${q.questionCount ?? q.questions.length} · ${(q.hasWritten ?? q.questions.some((i) => i.type === "written")) ? "includes written answers" : "objective assessment"}</dd></div><div><dt>Time limit</dt><dd>${q.duration} minutes${q.perQuestionSeconds ? " · " + q.perQuestionSeconds + " seconds per question" : ""}</dd></div><div><dt>Marking</dt><dd>${q.marks} per correct answer · ${q.penalty ? "−" + q.penalty + " per wrong answer" : "no negative marking"}</dd></div><div><dt>Attempts</dt><dd>${q.attemptLimit}</dd></div><div><dt>Navigation</dt><dd>${q.perQuestionSeconds || q.allowNavigation === false ? "Forward only; previous answers lock" : "Return to questions freely"}</dd></div><div><dt>Results</dt><dd>${q.release ? "After submission and any manual grading" : "Released by your professor"}</dd></div></dl><p class="muted">The timer continues when you leave or refresh. Saved answers are submitted when the deadline ends. Multiple-choice questions require all correct selections for full marks.</p>${q.closesAt ? `<p class="subtext">Closes ${escape(fmtDate(q.closesAt))}. Your deadline will not extend beyond closing time.</p>` : ""}</section><form id="start-form" class="panel narrow"><h2>Confirm your details</h2>${identityFields({ ...db.identity, className: db.identity.className || q.className }, q.collegeId)}<label class="check-label" style="margin-top:25px"><input type="checkbox" required name="ready">I have read the instructions and am ready.</label><p id="form-error" class="error" role="alert"></p><div class="actions"><button class="primary">Start assessment</button><button type="button" data-action="dashboard">Back</button></div></form>`
   );
 }
 function saveStatus() {
@@ -554,10 +661,14 @@ function history() {
   const attempts = myAttempts()
     .filter((a) => a.status === "submitted")
     .sort((a, b) => b.submittedAt - a.submittedAt);
+  const page = listPage("results", attempts, (a) =>
+    [a.quiz.title, a.identity?.className].join(" "),
+  );
   return (
     heading("Your results", "Your completed assessments and released scores.") +
-    (attempts.length
-      ? `<div class="panel table-wrap"><table><thead><tr><th>Assessment</th><th>Submitted</th><th>Score</th><th></th></tr></thead><tbody>${attempts.map((a) => `<tr><td>${escape(a.quiz.title)}</td><td>${escape(fmtDate(a.submittedAt))}</td><td>${a.result && (!localPreview || quizById(a.quizId)?.release) && !a.result.pendingManual ? a.result.score + " / " + a.result.maximum : "Awaiting grading/release"}</td><td><button class="small" data-action="result" data-id="${escape(a.id)}">View result</button></td></tr>`).join("")}</tbody></table></div>`
+    listControls("results", page) +
+    (page.items.length
+      ? `<div class="panel table-wrap"><table><thead><tr><th scope="col">Assessment</th><th scope="col">Submitted</th><th scope="col">Score</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead><tbody>${page.items.map((a) => `<tr><td>${escape(a.quiz.title)}</td><td>${escape(fmtDate(a.submittedAt))}</td><td>${a.result && (!localPreview || quizById(a.quizId)?.release) && !a.result.pendingManual ? a.result.score + " / " + a.result.maximum : "Awaiting grading/release"}</td><td><button class="small" data-action="result" data-id="${escape(a.id)}">View result</button></td></tr>`).join("")}</tbody></table></div>`
       : empty("Completed assessments will appear here."))
   );
 }
@@ -582,6 +693,9 @@ function professorDashboard() {
     attempts = db.attempts.filter(
       (a) => a.status === "submitted" && quizzes.some((q) => q.id === a.quizId),
     );
+  const page = listPage("assessments", quizzes, (q) =>
+    [q.title, q.subject, q.className].join(" "),
+  );
   return (
     heading(
       "Manage assessments",
@@ -589,7 +703,7 @@ function professorDashboard() {
       '<button class="primary" data-action="new-quiz">Create assessment</button>',
     ) +
     picker +
-    `<div class="stats">${stat("Assessments", quizzes.length)}${stat("Published", quizzes.filter((q) => q.published).length)}${stat("Submissions", attempts.length)}</div><div class="quiz-list">${quizzes.map((q) => quizCard(q, true)).join("") || empty("Create your first assessment to get started.")}</div>`
+    `<div class="stats">${stat("Assessments", quizzes.length)}${stat("Published", quizzes.filter((q) => q.published).length)}${stat("Submissions", attempts.length)}</div>${listControls("assessments", page)}<div class="quiz-list">${page.items.map((q) => quizCard(q, true)).join("") || empty("Create your first assessment to get started.")}</div>`
   );
 }
 function localDate(value) {
@@ -607,7 +721,7 @@ function quizEditor() {
       "Assessment editor",
       "Draft questions, configure rules, then publish.",
     ) +
-    `<form id="editor-form"><section class="panel"><h2>Assessment details</h2><div class="form-grid"><label>Title<input name="title" value="${escape(q.title)}" required maxlength="140"></label><label>Subject<input name="subject" value="${escape(q.subject)}" maxlength="100"></label><label class="full">Description<textarea name="description" maxlength="1000">${escape(q.description)}</textarea></label><label>Assigned class<input name="className" value="${escape(q.className)}" maxlength="100" required></label><label>Quiz code<input name="code" value="${escape(q.code)}" maxlength="20" required></label><label>Joining method<select name="joinMode">${[
+    `<div class="draft-notice"><p id="editor-recovery-status" role="status">${recoveredEditor ? "Recovered your unsaved assessment. Review it before saving." : "Unsaved edits are recovered on refresh in this tab for up to 24 hours. Signing out clears recovery copies."}</p>${recoveredEditor ? '<button class="small ghost" data-action="discard-editor-draft">Discard recovery copy</button>' : ""}</div><form id="editor-form"><section class="panel"><h2>Assessment details</h2><div class="form-grid"><label>Title<input name="title" value="${escape(q.title)}" required maxlength="140"></label><label>Subject<input name="subject" value="${escape(q.subject)}" maxlength="100"></label><label class="full">Description<textarea name="description" maxlength="1000">${escape(q.description)}</textarea></label><label>Assigned class<input name="className" value="${escape(q.className)}" maxlength="100" required></label><label>Quiz code<input name="code" value="${escape(q.code)}" maxlength="20" required></label><label>Joining method<select name="joinMode">${[
       ["both", "Class assignment and quiz code"],
       ["code", "Quiz code only"],
       ["roster", "Roster assignment only"],
@@ -638,7 +752,7 @@ function quizEditor() {
       )
       .join(
         "",
-      )}<label>Opens at (local time)<input type="datetime-local" name="opensAt" value="${localDate(q.opensAt)}"></label><label>Closes at (local time)<input type="datetime-local" name="closesAt" value="${localDate(q.closesAt)}"></label><label class="check-label"><input type="checkbox" name="allowNavigation" ${q.allowNavigation !== false ? "checked" : ""}>Allow returning to questions</label><label class="check-label"><input type="checkbox" name="shuffle" ${q.shuffle ? "checked" : ""}>Randomize question order per attempt</label><label class="check-label full"><input type="checkbox" name="release" ${q.release ? "checked" : ""}>Release scores and answers after submission and manual grading</label></div><p class="subtext">Per-question timers enforce forward-only navigation. The exam deadline still applies. Written responses need manual grading.</p></section><section class="panel"><h2>Assigned roster (optional)</h2><label>One email,roll number per line<textarea name="roster" placeholder="student@college.edu,ROLL001" rows="5">${escape((q.roster || []).map((r) => r.email + "," + r.roll).join("\n"))}</textarea></label><p class="subtext">Required for roster-only assessments. Import up to 2000 entries. This replaces this quiz’s roster when saved.</p></section><section class="panel"><h2>Questions</h2>${q.questions.map((item, i) => `<div class="question-editor"><div class="editor-heading"><h3>Question ${i + 1}</h3><button class="ghost small danger" type="button" data-action="remove-question" data-index="${i}" ${q.questions.length === 1 ? "disabled" : ""}>Remove</button></div><label>Question type<select name="q-${i}-type" data-question-type="${i}">${["single", "multiple", "written"].map((type) => `<option value="${type}" ${(item.type || "single") === type ? "selected" : ""}>${type === "single" ? "Single choice" : type === "multiple" ? "Multiple select" : "Written answer"}</option>`).join("")}</select></label><label style="margin-top:18px">Question text<textarea name="q-${i}" maxlength="4000" required>${escape(item.text)}</textarea></label><p class="subtext">Equations: use $x^2$ inline or $$…$$ for a displayed equation.</p><div class="form-grid"><label>Image URL (optional, HTTPS)<input name="q-${i}-image" type="url" maxlength="2000" value="${escape(item.imagePath || item.localImage ? "" : item.image || "")}"></label>${item.image ? image(item) + `<button type="button" class="small" data-action="remove-image" data-index="${i}">Remove image</button>` : ""}<label>Upload image (PNG, JPEG, WebP)<input type="file" accept="image/png,image/jpeg,image/webp" data-image-upload="${i}"></label><label>Image description<input name="q-${i}-alt" maxlength="500" value="${escape(item.imageAlt || "")}"></label>${item.type === "written" ? `<label class="full">Grading rubric<textarea name="q-${i}-rubric" maxlength="2000">${escape(item.rubric || "")}</textarea></label>` : item.options.map((option, j) => `<label>Option ${String.fromCharCode(65 + j)}<input name="q-${i}-o-${j}" maxlength="1000" value="${escape(option)}" required></label>`).join("")}${item.type === "multiple" ? `<div class="full"><p class="subtext">Correct selections</p><div class="actions">${item.options.map((_, j) => `<label class="check-label"><input name="q-${i}-correct-${j}" type="checkbox" ${(item.correctOptions || []).includes(j) ? "checked" : ""}>Option ${String.fromCharCode(65 + j)}</label>`).join("")}</div></div>` : item.type === "written" ? "" : `<label>Correct answer<select name="q-${i}-correct">${item.options.map((_, j) => `<option value="${j}" ${item.correctOption === j ? "selected" : ""}>Option ${String.fromCharCode(65 + j)}</option>`).join("")}</select></label>`}</div></div>`).join("")}<div class="actions"><button type="button" data-action="add-question" ${q.questions.length >= 100 ? "disabled" : ""}>+ Add question</button></div></section><p id="form-error" class="error" role="alert"></p><div class="actions"><button class="primary">Save assessment</button><button type="button" data-action="dashboard">Cancel</button><span class="subtext">Existing attempts retain their original questions and rules.</span></div></form>`
+      )}<label>Opens at (local time)<input type="datetime-local" name="opensAt" value="${localDate(q.opensAt)}"></label><label>Closes at (local time)<input type="datetime-local" name="closesAt" value="${localDate(q.closesAt)}"></label><label class="check-label"><input type="checkbox" name="allowNavigation" ${q.allowNavigation !== false ? "checked" : ""}>Allow returning to questions</label><label class="check-label"><input type="checkbox" name="shuffle" ${q.shuffle ? "checked" : ""}>Randomize question order per attempt</label><label class="check-label full"><input type="checkbox" name="release" ${q.release ? "checked" : ""}>Release scores and answers after submission and manual grading</label></div><p class="subtext">Per-question timers enforce forward-only navigation. The exam deadline still applies. Written responses need manual grading.</p></section><section class="panel"><h2>Assigned roster (optional)</h2><label>One email,roll number per line<textarea name="roster" placeholder="student@college.edu,ROLL001" rows="5">${escape((q.roster || []).map((r) => r.email + "," + r.roll).join("\n"))}</textarea></label><p class="subtext">Required for roster-only assessments. Import up to 2000 entries. This replaces this quiz’s roster when saved.</p></section><section class="panel"><div class="section-heading"><h2>Questions</h2><button type="button" class="small ghost" data-action="question-template">Download CSV template</button></div><label>Import question CSV<input id="question-import" type="file" accept=".csv,text/csv"></label><p id="import-error" class="error" role="alert"></p><p class="subtext">Adds single-choice, multiple-select, and written questions. Review the template first. Correct selections use A, B, or A;C. Maximum 100 questions.</p>${q.questions.map((item, i) => `<div class="question-editor"><div class="editor-heading"><h3>Question ${i + 1}</h3><button class="ghost small danger" type="button" data-action="remove-question" data-index="${i}" ${q.questions.length === 1 ? "disabled" : ""}>Remove</button></div><label>Question type<select name="q-${i}-type" data-question-type="${i}">${["single", "multiple", "written"].map((type) => `<option value="${type}" ${(item.type || "single") === type ? "selected" : ""}>${type === "single" ? "Single choice" : type === "multiple" ? "Multiple select" : "Written answer"}</option>`).join("")}</select></label><label style="margin-top:18px">Question text<textarea name="q-${i}" maxlength="4000" required>${escape(item.text)}</textarea></label><p class="subtext">Equations: use $x^2$ inline or $$…$$ for a displayed equation.</p><div class="form-grid"><label>Image URL (optional, HTTPS)<input name="q-${i}-image" type="url" maxlength="2000" value="${escape(item.imagePath || item.localImage ? "" : item.image || "")}"></label>${item.image ? image(item) + `<button type="button" class="small" data-action="remove-image" data-index="${i}">Remove image</button>` : ""}<label>Upload image (PNG, JPEG, WebP)<input type="file" accept="image/png,image/jpeg,image/webp" data-image-upload="${i}"></label><label>Image description<input name="q-${i}-alt" maxlength="500" value="${escape(item.imageAlt || "")}"></label>${item.type === "written" ? `<label class="full">Grading rubric<textarea name="q-${i}-rubric" maxlength="2000">${escape(item.rubric || "")}</textarea></label>` : item.options.map((option, j) => `<label>Option ${String.fromCharCode(65 + j)}<input name="q-${i}-o-${j}" maxlength="1000" value="${escape(option)}" required></label>`).join("")}${item.type === "multiple" ? `<div class="full"><p class="subtext">Correct selections</p><div class="actions">${item.options.map((_, j) => `<label class="check-label"><input name="q-${i}-correct-${j}" type="checkbox" ${(item.correctOptions || []).includes(j) ? "checked" : ""}>Option ${String.fromCharCode(65 + j)}</label>`).join("")}</div></div>` : item.type === "written" ? "" : `<label>Correct answer<select name="q-${i}-correct">${item.options.map((_, j) => `<option value="${j}" ${item.correctOption === j ? "selected" : ""}>Option ${String.fromCharCode(65 + j)}</option>`).join("")}</select></label>`}</div></div>`).join("")}<div class="actions"><button type="button" data-action="add-question" ${q.questions.length >= 100 ? "disabled" : ""}>+ Add question</button></div></section><p id="form-error" class="error" role="alert"></p><div class="actions"><button class="primary">Save assessment</button><button type="button" data-action="dashboard">Cancel</button><span class="subtext">Existing attempts retain their original questions and rules.</span></div></form>`
   );
 }
 function previewQuiz() {
@@ -671,6 +785,11 @@ function submissions() {
         .map((a) => a.identity.className),
     ),
   ];
+  const page = listPage("submissions", attempts, (a) =>
+    [a.identity.name, a.identity.roll, a.identity.className, a.quiz.title].join(
+      " ",
+    ),
+  );
   return (
     heading(
       "Student submissions",
@@ -678,8 +797,9 @@ function submissions() {
       `<button data-action="export" ${!attempts.length ? "disabled" : ""}>Export CSV</button>`,
     ) +
     `<div class="stats">${stat("Submissions", attempts.length)}${stat("Average graded score", graded.length ? Math.round(graded.reduce((sum, a) => sum + a.result.percent, 0) / graded.length) + "%" : "—")}${stat("Awaiting grading", attempts.length - graded.length)}</div><label class="panel">Filter by class<select id="submission-filter"><option value="">All classes</option>${classes.map((c) => `<option ${submissionFilter === c ? "selected" : ""} value="${escape(c)}">${escape(c)}</option>`).join("")}</select></label>` +
-    (attempts.length
-      ? `<div class="panel table-wrap"><table><thead><tr><th>Student</th><th>Assessment</th><th>Score</th><th>Submitted</th><th></th></tr></thead><tbody>${attempts.map((a) => `<tr><td>${escape(a.identity.name)}<p class="subtext">${escape(a.identity.roll)} · ${escape(a.identity.email)}</p></td><td>${escape(a.quiz.title)}</td><td>${a.result?.score ?? "—"} / ${a.result?.maximum ?? "—"}${a.result?.pendingManual ? '<br><span class="badge amber">Needs grading</span>' : ""}</td><td>${escape(fmtDate(a.submittedAt))}</td><td><button class="small" data-action="grade" data-id="${escape(a.id)}">Review</button></td></tr>`).join("")}</tbody></table></div>`
+    listControls("submissions", page) +
+    (page.items.length
+      ? `<div class="panel table-wrap"><table><thead><tr><th scope="col">Student</th><th scope="col">Assessment</th><th scope="col">Score</th><th scope="col">Submitted</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead><tbody>${page.items.map((a) => `<tr><td>${escape(a.identity.name)}<p class="subtext">${escape(a.identity.roll)} · ${escape(a.identity.email)}</p></td><td>${escape(a.quiz.title)}</td><td>${a.result?.score ?? "—"} / ${a.result?.maximum ?? "—"}${a.result?.pendingManual ? '<br><span class="badge amber">Needs grading</span>' : ""}</td><td>${escape(fmtDate(a.submittedAt))}</td><td><button class="small" data-action="grade" data-id="${escape(a.id)}">Review</button></td></tr>`).join("")}</tbody></table></div>`
       : empty("No student submissions yet."))
   );
 }
@@ -697,7 +817,7 @@ function adminOverview() {
       "Manage colleges, email-domain filters, and professor access.",
       '<button data-action="backup">Download backup</button>',
     ) +
-    `<div class="stats">${stat("Colleges", db.colleges.length)}${stat("Approved professors", db.professors.filter((p) => p.status === "approved").length)}${stat("Pending approvals", db.professors.filter((p) => p.status !== "approved").length)}</div><section class="panel"><h2>Colleges & student domains</h2>${db.colleges.map((c) => `<form class="form-grid college-edit" data-id="${escape(c.id)}" style="padding:20px 0;border-bottom:1px solid var(--line)"><label>College name<input name="name" maxlength="100" required value="${escape(c.name)}"></label><label>Allowed domains (comma-separated)<input name="domains" required value="${escape(c.domains.join(", "))}"></label><label class="check-label"><input type="checkbox" name="enabled" ${c.enabled !== false ? "checked" : ""}>College enabled</label><div><button class="small">Update college</button></div></form>`).join("")}<form id="college-form" class="form-grid" style="margin-top:24px"><label>New college name<input name="name" maxlength="100" required></label><label>Allowed email domains<input name="domains" required placeholder="college.edu.in"></label><div class="full"><button>Add college</button></div></form></section><section class="panel"><h2>Professor access</h2><div class="table-wrap"><table><thead><tr><th>Professor</th><th>College</th><th>Status</th><th></th></tr></thead><tbody>${db.professors.map((p) => `<tr><td>${escape(p.name)}<p class="subtext">${escape(p.email)}</p></td><td>${escape(db.colleges.find((c) => c.id === p.collegeId)?.name)}</td><td><span class="badge ${p.status === "approved" ? "green" : "amber"}">${escape(p.status)}</span></td><td><button class="small" data-action="approve" data-id="${escape(p.id)}">${p.status === "approved" ? "Revoke approval" : "Approve"}</button></td></tr>`).join("")}</tbody></table></div><form id="professor-form" class="form-grid" style="margin-top:24px"><label>Professor name<input name="name" required maxlength="100"></label><label>Professor email<input name="email" type="email" required maxlength="254"></label><label>College<select name="collegeId">${collegeOptions("bmu")}</select></label><div class="full"><button>Add for approval</button></div></form><p class="subtext">Each professor signs in using their own Google account. Access requires administrator approval.</p></section>${db.audit?.length ? `<section class="panel"><h2>Recent administrative activity</h2>${db.audit.map((e) => `<p class="subtext">${escape(fmtDate(e.createdAt))} · ${escape(e.operation)} · ${escape(e.recordId || "")}</p>`).join("")}</section>` : ""}`
+    `<div class="stats">${stat("Colleges", db.colleges.length)}${stat("Approved professors", db.professors.filter((p) => p.status === "approved").length)}${stat("Pending approvals", db.professors.filter((p) => p.status !== "approved").length)}</div><section class="panel"><h2>Colleges & student domains</h2>${db.colleges.map((c) => `<form class="form-grid college-edit" data-id="${escape(c.id)}" style="padding:20px 0;border-bottom:1px solid var(--line)"><label>College name<input name="name" maxlength="100" required value="${escape(c.name)}"></label><label>Allowed domains (comma-separated)<input name="domains" required value="${escape(c.domains.join(", "))}"></label><label class="check-label"><input type="checkbox" name="enabled" ${c.enabled !== false ? "checked" : ""}>College enabled</label><div><button class="small">Update college</button></div></form>`).join("")}<form id="college-form" class="form-grid" style="margin-top:24px"><label>New college name<input name="name" maxlength="100" required></label><label>Allowed email domains<input name="domains" required placeholder="college.edu.in"></label><div class="full"><button>Add college</button></div></form></section><section class="panel"><h2>Professor access</h2><div class="table-wrap"><table><thead><tr><th scope="col">Professor</th><th scope="col">College</th><th scope="col">Status</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead><tbody>${db.professors.map((p) => `<tr><td>${escape(p.name)}<p class="subtext">${escape(p.email)}</p></td><td>${escape(db.colleges.find((c) => c.id === p.collegeId)?.name)}</td><td><span class="badge ${p.status === "approved" ? "green" : "amber"}">${escape(p.status)}</span></td><td><button class="small" data-action="approve" data-id="${escape(p.id)}">${p.status === "approved" ? "Revoke approval" : "Approve"}</button></td></tr>`).join("")}</tbody></table></div><form id="professor-form" class="form-grid" style="margin-top:24px"><label>Professor name<input name="name" required maxlength="100"></label><label>Professor email<input name="email" type="email" required maxlength="254"></label><label>College<select name="collegeId">${collegeOptions("bmu")}</select></label><div class="full"><button>Add for approval</button></div></form><p class="subtext">Each professor signs in using their own Google account. Access requires administrator approval.</p></section>${db.audit?.length ? `<section class="panel"><h2>Recent administrative activity</h2>${db.audit.map((e) => `<p class="subtext">${escape(fmtDate(e.createdAt))} · ${escape(e.operation)} · ${escape(e.recordId || "")}</p>`).join("")}</section>` : ""}`
   );
 }
 function admin() {
@@ -802,6 +922,11 @@ function render() {
       .slice(0, 2),
   )}</span></div></header>${localPreview ? '<div class="demo-banner">Local preview · Browser data and role switching are for development only.</div>' : ""}<main id="main" tabindex="-1">${body}</main></div></div>`;
   tick();
+  document.title = `${{ dashboard: "Assessments", editor: "Assessment editor", submissions: "Submissions", history: "My results", exam: "Assessment in progress", result: "Assessment result", profile: "Student details", grading: "Grade responses", professors: "Professor access", audit: "Activity and backups" }[view] || "Workspace"} | ExamEngine`;
+  if (view === "editor") {
+    restoreEditorFields();
+    if (editorDirty) saveEditorRecovery();
+  }
 }
 function renderGate(title, message, signin = false) {
   app.innerHTML = `<main id="main" class="auth-page"><section class="auth-story" aria-label="About ExamEngine"><a class="brand" href="${db ? defaultPath(role, basePath) : routePath(null, "signin", null, basePath)}" data-action="home"><span class="brand-mark">${icon("book")}</span>ExamEngine</a><div class="auth-story-body"><p class="eyebrow">THE ASSESSMENT WORKSPACE</p><h2>A focused space <br>to do your best.</h2><p>From the first question to the final submission. A clear, considered assessment experience for students and educators.</p><div class="assessment-preview" aria-hidden="true"><div class="preview-top"><span>ASSESSMENT IN PROGRESS</span><span>08:42</span></div><div class="preview-progress"><i></i></div><span class="preview-label">QUESTION 04 / 10</span><p>Great questions deserve<br>your full attention.</p><div class="preview-option"><span>A</span><i></i><b>✓</b></div><div class="preview-option"><span>B</span><i></i></div><div class="preview-bottom"><span>Response saved</span><span>Next question →</span></div></div></div><div class="auth-story-footer"><span>Built around learning.</span><span>01 — EXAMENGINE</span></div></section><section class="auth-entry"><div class="auth-entry-top">STUDENTS & EDUCATORS <span>ACCOUNT ACCESS</span></div><div class="panel auth-card"><div class="auth-lock">${icon("lock")}</div><p class="eyebrow">YOUR WORKSPACE AWAITS</p><h1>${escape(title === "Welcome to ExamEngine" ? "Welcome back." : title)}</h1><p class="muted auth-message">${escape(signin && title === "Welcome to ExamEngine" ? "Sign in to access your assessments, submissions, and results." : message)}</p>${signin ? `<button class="google-signin" data-action="signin"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path fill="#4285F4" d="M21.6 12.2c0-.7-.1-1.4-.2-2.1H12v4h5.4a4.6 4.6 0 0 1-2 3v2.5h3.3c1.9-1.7 2.9-4.2 2.9-7.4Z"/><path fill="#34A853" d="M12 22c2.7 0 5-.9 6.7-2.4l-3.3-2.5c-.9.6-2 1-3.4 1a6 6 0 0 1-5.7-4.2H2.9v2.6A10 10 0 0 0 12 22Z"/><path fill="#FBBC05" d="M6.3 13.9a6 6 0 0 1 0-3.8V7.5H2.9a10 10 0 0 0 0 9l3.4-2.6Z"/><path fill="#EA4335" d="M12 5.9c1.5 0 2.8.5 3.9 1.5l2.9-2.9A9.7 9.7 0 0 0 12 2a10 10 0 0 0-9.1 5.5l3.4 2.6A6 6 0 0 1 12 5.9Z"/></svg>Continue with Google ${icon("arrow")}</button>` : ""}<p class="error" id="form-error" role="alert"></p><div class="access-note">${icon("lock")}<p>Use your college or approved educator account.<br>Your institution manages workspace access.</p></div><button class="privacy-link" data-action="privacy">Privacy & account information ${icon("arrow")}</button></div><footer class="auth-entry-footer"><span>ExamEngine © ${new Date().getFullYear()}</span><span>Focus on what you know.</span></footer></section></main>`;
@@ -950,7 +1075,7 @@ async function finish(reason) {
       localStorage.removeItem("examengine.draft." + db.actorId);
     }
     saveError = "";
-    go("result");
+    await go("result");
   } catch (e) {
     toast(e.message);
   } finally {
@@ -1081,6 +1206,11 @@ function collectEditor() {
     if (prior === "single") q.correctOption = Number(f.get(`q-${i}-correct`));
     if (prior === "written") q.rubric = (f.get(`q-${i}-rubric`) || "").trim();
     q.type = f.get(`q-${i}-type`);
+    if (q.type !== "written" && q.options.length < 2) {
+      q.options = ["", "", "", ""];
+      q.correctOption = 0;
+      q.correctOptions = [0];
+    }
   });
 }
 async function refresh() {
@@ -1092,7 +1222,11 @@ async function refresh() {
   render();
 }
 app.addEventListener("input", (event) => {
-  if (event.target.closest("#editor-form")) editorDirty = true;
+  if (event.target.closest("#editor-form")) {
+    editorDirty = true;
+    clearTimeout(draftTimer);
+    draftTimer = setTimeout(saveEditorRecovery, 300);
+  }
   if (event.target.name === "written") {
     if (!guardDeadline()) return;
     const a = activeAttempt();
@@ -1120,8 +1254,42 @@ app.addEventListener("input", (event) => {
   }
 });
 app.addEventListener("change", async (event) => {
-  if (event.target.closest("#editor-form")) editorDirty = true;
+  if (event.target.closest("#editor-form")) {
+    editorDirty = true;
+    clearTimeout(draftTimer);
+    draftTimer = setTimeout(saveEditorRecovery, 300);
+  }
   try {
+    if (event.target.id === "question-import") {
+      const file = event.target.files[0];
+      if (!file) return;
+      if (file.size > 2_000_000)
+        throw new Error("Choose a CSV smaller than 2 MB.");
+      const importingEditor = editor,
+        importingScope = editorScope();
+      const questions = importQuestions(await file.text());
+      if (
+        view !== "editor" ||
+        editor !== importingEditor ||
+        editorScope() !== importingScope
+      )
+        return;
+      collectEditor();
+      const blank =
+        editor.questions.length === 1 &&
+        !editor.questions[0].text &&
+        editor.questions[0].options.every((v) => !v);
+      if ((blank ? 0 : editor.questions.length) + questions.length > 100)
+        throw new Error("An assessment can contain at most 100 questions.");
+      editor.questions = [...(blank ? [] : editor.questions), ...questions];
+      editorDirty = true;
+      render();
+      saveEditorRecovery();
+      toast(
+        `${questions.length} questions imported. Review them before saving.`,
+      );
+      return;
+    }
     if (event.target.dataset.imageUpload !== undefined) {
       const file = event.target.files[0];
       if (!file) return;
@@ -1192,7 +1360,11 @@ app.addEventListener("change", async (event) => {
       document.querySelector(`input[name="answer"][value="${value}"]`)?.focus();
     }
   } catch (e) {
-    toast(e.message);
+    if (event.target.id === "question-import") {
+      const message = document.querySelector("#import-error");
+      if (message) message.textContent = e.message;
+      event.target.value = "";
+    } else toast(e.message);
   }
 });
 app.addEventListener("click", async (event) => {
@@ -1207,6 +1379,14 @@ app.addEventListener("click", async (event) => {
   const action = el.dataset.action,
     id = el.dataset.id;
   if (busy) return;
+  if (action === "list-page") {
+    const state = listState.get(el.dataset.list);
+    if (!state) return;
+    state.page = Number(el.dataset.page);
+    render();
+    document.querySelector("main")?.focus();
+    return;
+  }
   if (action === "home") {
     navigatePath(
       db
@@ -1268,12 +1448,18 @@ app.addEventListener("click", async (event) => {
       if (professor()?.status !== "approved")
         throw new Error("Professor approval required.");
       editor = newQuiz();
+      recoveredEditor = false;
+      if (localPreview) restoreEditorRecovery();
       go("editor");
     } else if (action === "edit") {
       editor = structuredClone(quizById(id));
+      recoveredEditor = false;
+      if (localPreview) restoreEditorRecovery();
       go("editor");
-    } else if (action === "preview") go("preview", id);
-    else if (action === "publish") {
+    } else if (action === "preview") {
+      await prepareMath({ quizzes: [quizById(id)] });
+      go("preview", id);
+    } else if (action === "publish") {
       const q = quizById(id);
       if (!q.published) {
         const error = validateQuiz(q);
@@ -1288,6 +1474,23 @@ app.addEventListener("click", async (event) => {
       );
       render();
       toast("Publication updated.");
+    } else if (action === "question-template") {
+      const blob = new Blob([questionTemplate], {
+        type: "text/csv;charset=utf-8",
+      });
+      downloadBlob(blob, "examengine-question-template.csv");
+    } else if (action === "discard-editor-draft") {
+      if (
+        !window.confirm(
+          "Discard this recovery copy and reload the saved assessment?",
+        )
+      )
+        return;
+      removeDraft(sessionStorage, editorScope(), editorRoute());
+      editorDirty = false;
+      recoveredEditor = false;
+      pendingEditorFields = null;
+      await readRoute(true);
     } else if (action === "add-question" || action === "remove-question") {
       editorDirty = true;
       collectEditor();
@@ -1401,6 +1604,16 @@ app.addEventListener("submit", async (event) => {
   if (button) button.disabled = true;
   try {
     const f = new FormData(form);
+    if (form.dataset.listSearch) {
+      const state = listState.get(form.dataset.listSearch);
+      if (state) {
+        state.query = String(f.get("query") || "").slice(0, 100);
+        state.page = 1;
+        render();
+        document.querySelector("main")?.focus();
+      }
+      return;
+    }
     if (form.id === "join-form") {
       joinedCode = f.get("code").trim().toUpperCase();
       let q;
@@ -1462,6 +1675,7 @@ app.addEventListener("submit", async (event) => {
           applyWorkspace(
             await run("start", { quizId: q.id, code: joinedCode }),
           );
+        await prepareMath(db);
         saveError = "";
         go("exam");
       } else {
@@ -1487,6 +1701,7 @@ app.addEventListener("submit", async (event) => {
         )
       )
         throw new Error("Quiz code already in use.");
+      const recoveryRoute = editorRoute();
       const saved = structuredClone(editor);
       await command("saveQuiz", { quiz: saved }, () => {
         const idx = db.quizzes.findIndex((q) => q.id === saved.id);
@@ -1497,6 +1712,10 @@ app.addEventListener("submit", async (event) => {
         applyWorkspace(
           await run("roster", { quizId: saved.id, rows: saved.roster }),
         );
+      removeDraft(sessionStorage, editorScope(), recoveryRoute);
+      removeDraft(sessionStorage, editorScope(), editorRoute());
+      recoveredEditor = false;
+      pendingEditorFields = null;
       editor = null;
       editorDirty = false;
       go("dashboard");
@@ -1646,9 +1865,13 @@ function privacyContent() {
   );
 }
 function downloadJSON(value, filename) {
-  const url = URL.createObjectURL(
+  downloadBlob(
     new Blob([JSON.stringify(value, null, 2)], { type: "application/json" }),
+    filename,
   );
+}
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
@@ -1778,6 +2001,11 @@ client?.auth.onAuthStateChange((event, session) => {
   if (localPreview) return;
   if (event === "SIGNED_OUT") {
     routeEpoch++;
+    clearTimeout(draftTimer);
+    clearEditorDrafts(sessionStorage);
+    pendingEditorFields = null;
+    recoveredEditor = false;
+    listState.clear();
     db = null;
     editor = null;
     editorDirty = false;
@@ -1810,6 +2038,7 @@ setInterval(tick, 1000);
 window.addEventListener("popstate", () => void readRoute());
 window.addEventListener("beforeunload", (event) => {
   if (editorDirty) {
+    saveEditorRecovery();
     event.preventDefault();
     event.returnValue = "";
   }

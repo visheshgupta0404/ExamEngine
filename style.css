@@ -2320,3 +2320,55 @@ label {
     width: 100%;
   }
 }
+
+/* Bound long lists and preserve comfortable controls on small screens. */
+.list-controls {
+  display: flex;
+  gap: 12px;
+  align-items: end;
+  margin: 20px 0 12px;
+}
+.list-controls label {
+  flex: 1;
+  max-width: 540px;
+}
+.list-controls button {
+  flex-shrink: 0;
+}
+.pagination {
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  align-items: center;
+  margin: 12px 0 20px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.pagination .actions {
+  align-items: center;
+}
+.draft-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 18px;
+  margin-bottom: 20px;
+}
+.draft-notice p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+@media (max-width: 600px) {
+  .pagination,
+  .draft-notice {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .pagination .actions {
+    flex-wrap: wrap;
+  }
+}

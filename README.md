@@ -2,7 +2,7 @@
 
 A focused dark-blue assessment platform for multiple colleges. Students take assessments and review released results; approved professors author quizzes and grade submissions; administrators configure college email domains and professor access.
 
-**Status:** application and backend implementation are prepared for setup. Local preview and PostgreSQL policy/rule tests work. Live Google/Supabase integration and hosting acceptance still require your accounts and configuration; do not invite real students until the staging checks pass.
+**Status:** deployed from `main` on GitHub Pages with Supabase and Google OAuth configured. Technical checks and a local student workload are automated. Real-account acceptance, secret replacement, institutional policies, and hosted capacity testing remain launch requirements. See [the technical handoff](docs/TECHNICAL-HANDOFF.md).
 
 ## Development
 
@@ -18,6 +18,7 @@ Open http://127.0.0.1:4173. Local preview includes sample BMU data and a role sw
 ```sh
 npm test
 npm run check
+npm run test:load -- --students=50
 npm run build
 ```
 
@@ -26,6 +27,8 @@ npm run build
 ## Implemented
 
 - Student identity, assigned quizzes, code joining, roster restrictions, attempts, history, and result release.
+- Professor editor recovery across refreshes in the same tab (24-hour expiry, cleared at sign-out), validated question CSV imports and downloadable templates.
+- Search and 20-item pages for assessments, submissions, and student results.
 - Single-choice, multiple-select, and written questions; equations, HTTPS illustrations, and private image uploads.
 - Exam and per-question deadlines, scheduling, question randomization, forward-only or free navigation, autosave, review flags, clear selection, refresh recovery, and timeout submission.
 - Configurable scoring/penalties/attempt limits, immutable attempt versions, manual written grading, class summaries, and safe CSV exports.

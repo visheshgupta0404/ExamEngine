@@ -1,6 +1,6 @@
 import http from "node:http";
 import { readFile } from "node:fs/promises";
-import { resolve, extname } from "node:path";
+import { resolve, extname, relative as relativePath } from "node:path";
 import { build } from "esbuild";
 import { publicConfig } from "./config.mjs";
 import { isAppDocument } from "../src/routes.js";
@@ -30,15 +30,32 @@ http
             : "";
       let content,
         file = relative;
-      if (relative === "script.js") {
+      if (
+        relative === "script.js" ||
+        /^chunks\/[A-Za-z0-9_-]+\.js$/.test(relative)
+      ) {
         const result = await build({
           entryPoints: ["script.js"],
           bundle: true,
           format: "esm",
           target: ["es2022"],
           write: false,
+          splitting: true,
+          outdir: resolve(".preview-build"),
+          chunkNames: "chunks/[name]-[hash]",
         });
-        content = result.outputFiles[0].contents;
+        const output = result.outputFiles.find(
+          (output) =>
+            relativePath(resolve(".preview-build"), output.path).replaceAll(
+              "\\",
+              "/",
+            ) === relative,
+        );
+        if (!output) {
+          res.writeHead(404);
+          return res.end("Not found");
+        }
+        content = output.contents;
       } else if (relative === "config.js")
         content = `globalThis.EXAMENGINE_CONFIG=${JSON.stringify(config)};`;
       else {

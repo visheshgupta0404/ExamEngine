@@ -31,7 +31,9 @@ await build({
   bundle: true,
   format: "esm",
   target: ["es2022"],
-  outfile: "dist/script.js",
+  outdir: "dist",
+  splitting: true,
+  chunkNames: "chunks/[name]-[hash]",
   minify: true,
   legalComments: "eof",
 });

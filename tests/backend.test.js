@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
 import { seedData } from "../src/data.js";
 import { restoreSQL } from "../tools/restore.mjs";
+import { testDatabase } from "../tools/test-database.mjs";
 
 test("production PostgreSQL migration and authorization workflows", async (t) => {
   const pg = await PGlite.create();
@@ -634,6 +635,41 @@ test("production PostgreSQL migration and authorization workflows", async (t) =>
         const backup = await rpc("backup");
         assert.ok(backup.attempts.length > 0);
         await pg.exec("reset role");
+        const fresh = await testDatabase();
+        try {
+          const auth = await pg.query(
+            "select to_jsonb(u) as data from auth.users u",
+          );
+          for (const { data } of auth.rows)
+            await fresh.query(
+              "insert into auth.users select * from jsonb_populate_record(null::auth.users,$1::jsonb)",
+              [JSON.stringify(data)],
+            );
+          await fresh.exec(restoreSQL(backup));
+          const sorted = (rows) =>
+            rows.map((row) => JSON.stringify(row)).sort();
+          for (const table of [
+            "colleges",
+            "admin_emails",
+            "professor_access",
+            "profiles",
+            "quizzes",
+            "versions",
+            "rosters",
+            "attempts",
+          ]) {
+            const restored = await fresh.query(
+              `select to_jsonb(t) as data from exam_private.${table} t`,
+            );
+            assert.deepEqual(
+              sorted(restored.rows.map((row) => row.data)),
+              sorted(backup[table]),
+              table + " must restore exactly",
+            );
+          }
+        } finally {
+          await fresh.close();
+        }
         await pg.exec(
           "truncate exam_private.attempts,exam_private.rosters,exam_private.versions,exam_private.quizzes cascade;",
         );

@@ -32,3 +32,7 @@
 5. **Teaching insight:** question-level performance summaries, review filters, and accessible downloadable result reports. Keep access scoped to each professor/college and honor result-release rules.
 
 This is a bounded audit and repair pass, not a guarantee that every possible bug has been found. Current code, migrations, and deployment instructions are in the repository; private setup files remain ignored.
+
+## Follow-up - 21 October 2026
+
+Professor recovery, validated question CSV import, paged/searchable lists, more reliability checks, fresh-database backup verification, and a local student workload are implemented. Equation rendering now loads on demand. See [the technical completion report](TECHNICAL-HANDOFF.md) for evidence, limits, and remaining account/institution steps.

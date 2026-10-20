@@ -11,7 +11,8 @@
     "build:preview": "node tools/build.mjs --preview",
     "format": "prettier --write script.js src/*.js tools/*.mjs tests/*.js style.css index.html",
     "test": "node --test tests/*.test.js",
-    "check": "node --check script.js && node --check src/core.js && node --check src/data.js && node --check src/store.js"
+    "check": "node --check script.js && node --check src/core.js && node --check src/data.js && node --check src/store.js",
+    "test:load": "node tools/load-test.mjs"
   },
   "engines": {
     "node": ">=22"

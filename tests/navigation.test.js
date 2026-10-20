@@ -48,7 +48,7 @@ function deferred() {
   });
   return { promise, resolve, reject };
 }
-function harness() {
+function harness(sharedStore = new Map(), editorForm = null) {
   const listeners = {},
     windowListeners = {},
     skipListeners = {};
@@ -74,7 +74,7 @@ function harness() {
     search: "",
     hash: "",
   };
-  const store = new Map();
+  const store = sharedStore;
   const workspace = {
     role: "student",
     actorId: "student-1",
@@ -91,6 +91,7 @@ function harness() {
     professors: [],
   };
   const service = {
+    editorForm,
     getSession: async () => ({
       data: { session: { user: { id: "student-1" } } },
     }),
@@ -98,6 +99,25 @@ function harness() {
   };
   const context = vm.createContext({
     console,
+    FormData: class {
+      constructor(form) {
+        this.rows = form.elements
+          .filter(
+            (e) =>
+              e.name && (!["checkbox", "radio"].includes(e.type) || e.checked),
+          )
+          .map((e) => [e.name, e.value]);
+      }
+      [Symbol.iterator]() {
+        return this.rows[Symbol.iterator]();
+      }
+      get(name) {
+        return this.rows.find(([key]) => key === name)?.[1] ?? null;
+      }
+      has(name) {
+        return this.rows.some(([key]) => key === name);
+      }
+    },
     crypto: webcrypto,
     service,
     location,
@@ -107,11 +127,19 @@ function harness() {
     clearTimeout,
     setInterval: () => 0,
     sessionStorage: {
+      get length() {
+        return store.size;
+      },
+      key: (i) => [...store.keys()][i],
       getItem: (k) => store.get(k) || null,
       setItem: (k, v) => store.set(k, v),
       removeItem: (k) => store.delete(k),
     },
     localStorage: {
+      get length() {
+        return store.size;
+      },
+      key: (i) => [...store.keys()][i],
       getItem: (k) => store.get(k) || null,
       setItem: (k, v) => store.set(k, v),
       removeItem: (k) => store.delete(k),
@@ -121,22 +149,24 @@ function harness() {
       querySelector: (selector) =>
         selector === "#app"
           ? app
-          : selector === "main"
-            ? {
-                focus() {
-                  mainFocused = true;
-                },
-                setAttribute() {},
-                scrollIntoView() {},
-              }
-            : selector === ".skip-link"
+          : selector === "#editor-form"
+            ? service.editorForm
+            : selector === "main"
               ? {
-                  addEventListener: (name, handler) =>
-                    (skipListeners[name] = handler),
+                  focus() {
+                    mainFocused = true;
+                  },
+                  setAttribute() {},
+                  scrollIntoView() {},
                 }
-              : selector === "#toast"
-                ? { textContent: "", classList: { add() {}, remove() {} } }
-                : null,
+              : selector === ".skip-link"
+                ? {
+                    addEventListener: (name, handler) =>
+                      (skipListeners[name] = handler),
+                  }
+                : selector === "#toast"
+                  ? { textContent: "", classList: { add() {}, remove() {} } }
+                  : null,
       addEventListener() {},
     },
     window: {
@@ -160,6 +190,7 @@ function harness() {
     renders,
     location,
     service,
+    store,
     api: context.navigationTest,
   };
 }
@@ -347,4 +378,152 @@ test("skip link focuses the main area without changing the current route", async
   assert.equal(prevented, true);
   assert.equal(h.mainFocused(), true);
   assert.equal(h.location.pathname, "/student/assessments");
+});
+
+test("failed answer save retains its browser draft and succeeds on retry", async () => {
+  const h = harness();
+  await h.api.bootstrap();
+  const a = {
+    id: "retry",
+    userId: "student-1",
+    answers: { q: 1 },
+    flagged: [],
+    current: 0,
+    revision: 0,
+  };
+  h.service.rpc = async () => {
+    throw new Error("Offline");
+  };
+  h.api.queueSave(a);
+  await h.api.waitForSaves();
+  assert.match(h.api.saveStatus(), /Offline/);
+  assert.equal(
+    JSON.parse(h.store.get("examengine.draft.student-1")).answers.q,
+    1,
+  );
+  h.service.rpc = async (op, payload) => ({
+    ...payload,
+    id: a.id,
+    status: "active",
+  });
+  h.api.queueSave(a);
+  await h.api.waitForSaves();
+  assert.doesNotMatch(h.api.saveStatus(), /Offline/);
+  assert.ok(h.api.getWorkspace());
+});
+
+test("equal revision conflicts pause subsequent saves until server refresh", async () => {
+  const h = harness();
+  await h.api.bootstrap();
+  const a = {
+    id: "conflict",
+    userId: "student-1",
+    answers: { q: 1 },
+    flagged: [],
+    current: 0,
+    revision: 0,
+  };
+  let calls = 0;
+  h.service.rpc = async (op, payload) => {
+    calls++;
+    return { ...payload, id: a.id, status: "active", answers: { q: 0 } };
+  };
+  h.api.queueSave(a);
+  await h.api.waitForSaves();
+  assert.match(h.api.saveStatus(), /Another tab/);
+  assert.equal(
+    JSON.parse(h.store.get("examengine.draft.student-1")).conflict,
+    true,
+  );
+  h.api.queueSave(a);
+  await h.api.waitForSaves();
+  assert.equal(calls, 1);
+  const workspace = h.api.getWorkspace();
+  h.service.rpc = async () => workspace;
+  await h.api.refresh();
+  h.service.rpc = async (op, payload) => {
+    calls++;
+    return { ...payload, id: a.id, status: "active" };
+  };
+  h.api.queueSave(a);
+  await h.api.waitForSaves();
+  assert.equal(calls, 2);
+});
+
+test("refresh restores professor edits including an unfinished roster, and sign-out clears copies", async () => {
+  const store = new Map();
+  const form = () => ({
+    elements: [
+      { name: "title", type: "text", value: "" },
+      { name: "roster", type: "textarea", value: "" },
+    ],
+  });
+  const first = harness(store, form());
+  const workspace = await first.service.workspace();
+  workspace.role = "professor";
+  first.service.workspace = async () => structuredClone(workspace);
+  first.location.pathname = "/professor/assessments/new";
+  await first.api.bootstrap();
+  first.service.editorForm.elements[0].value = "Recover this title";
+  first.service.editorForm.elements[1].value = "unfinished@";
+  first.listeners.input({ target: { name: "title", closest: () => ({}) } });
+  first.windowListeners.beforeunload({ preventDefault() {} });
+  assert.ok(
+    [...store.keys()].some((key) => key.startsWith("examengine.editor.")),
+  );
+  const refreshed = harness(store, form());
+  refreshed.service.workspace = async () => structuredClone(workspace);
+  refreshed.location.pathname = "/professor/assessments/new";
+  await refreshed.api.bootstrap();
+  assert.match(refreshed.app.innerHTML, /Discard recovery copy/);
+  assert.equal(
+    refreshed.service.editorForm.elements[0].value,
+    "Recover this title",
+  );
+  assert.equal(refreshed.service.editorForm.elements[1].value, "unfinished@");
+  refreshed.service.onAuth("SIGNED_OUT", null);
+  assert.equal(
+    [...store.keys()].some((key) => key.startsWith("examengine.editor.")),
+    false,
+  );
+});
+
+test("assessment lists render only one page and search resets page selection", async () => {
+  const h = harness();
+  const w = await h.service.workspace();
+  w.quizzes = Array.from({ length: 105 }, (_, i) => ({
+    id: "quiz-" + i,
+    title: "Quiz " + i,
+    subject: "Testing",
+    collegeId: "college",
+    className: "CSE",
+    published: true,
+    joinMode: "both",
+    questions: [],
+    questionCount: 1,
+    duration: 10,
+    attemptLimit: 1,
+  }));
+  h.service.workspace = async () => structuredClone(w);
+  await h.api.bootstrap();
+  assert.equal((h.app.innerHTML.match(/class="quiz-card"/g) || []).length, 20);
+  assert.match(h.app.innerHTML, /1-20 of 105/);
+  const el = {
+    tagName: "BUTTON",
+    dataset: { action: "list-page", list: "assessments", page: "6" },
+  };
+  await h.listeners.click({
+    target: { closest: () => el },
+    preventDefault() {},
+  });
+  assert.equal((h.app.innerHTML.match(/class="quiz-card"/g) || []).length, 5);
+  assert.match(h.app.innerHTML, /101-105 of 105/);
+  const form = {
+    dataset: { listSearch: "assessments" },
+    querySelector: () => null,
+    elements: [{ name: "query", value: "Quiz 104", type: "search" }],
+  };
+  await h.listeners.submit({ target: form, preventDefault() {} });
+  assert.match(h.app.innerHTML, /1-1 of 1/);
+  assert.match(h.app.innerHTML, /Quiz 104/);
 });

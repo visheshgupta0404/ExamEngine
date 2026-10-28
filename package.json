@@ -12,7 +12,8 @@
     "format": "prettier --write script.js src/*.js tools/*.mjs tests/*.js style.css index.html",
     "test": "node --test tests/*.test.js",
     "check": "node --check script.js && node --check src/core.js && node --check src/data.js && node --check src/store.js",
-    "test:load": "node tools/load-test.mjs"
+    "test:load": "node tools/load-test.mjs",
+    "check:backend": "node tools/check-backend.mjs"
   },
   "engines": {
     "node": ">=22"

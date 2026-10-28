@@ -15,6 +15,7 @@ export async function testDatabase() {
     "002_question_images.sql",
     "003_maintenance.sql",
     "004_assessment_integrity.sql",
+    "005_availability.sql",
   ])
     await pg.exec(await readFile("backend/migrations/" + file, "utf8"));
   return pg;

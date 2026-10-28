@@ -1,0 +1,31 @@
+name: Check database availability
+on:
+  schedule:
+    # Four small database checks daily, away from the top of the hour (UTC).
+    - cron: '17 1,7,13,19 * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/availability.yml'
+      - 'tools/check-backend.mjs'
+      - 'backend/migrations/005_availability.sql'
+permissions:
+  contents: read
+concurrency:
+  group: database-availability
+  cancel-in-progress: false
+jobs:
+  database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify database is reachable
+        run: node tools/check-backend.mjs
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}

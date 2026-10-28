@@ -44,6 +44,10 @@ Follow [the deployment guide](docs/DEPLOYMENT.md) for Supabase migrations, Googl
 
 Free-tier quotas and inactivity rules apply. No paid plan has been enabled. Live capacity, institutional privacy/retention policy, and provider configuration must be confirmed before production use. No camera, microphone, location, or proctoring is collected.
 
+## Availability
+
+A small GitHub Actions database check is provided for Free plan readiness monitoring. It is best effort and cannot guarantee that Supabase never pauses. See [availability setup and limits](docs/AVAILABILITY.md).
+
 ## Author
 
 [Vishesh Gupta](https://github.com/visheshgupta0404)

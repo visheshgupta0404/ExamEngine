@@ -1,6 +1,6 @@
 # ExamEngine setup and launch
 
-The app is deployed on GitHub Pages, Supabase migrations 001-004 are applied, and the Google provider is configured. Real admin/professor/student acceptance testing and institution-approved privacy/support details remain necessary before inviting students. See [the audit](AUDIT.md) and [remaining setup](USER-SETUP-CHECKLIST.md). The production build cannot use the local role switch.
+The app is deployed on GitHub Pages, Supabase migrations 001-005 are applied, and the Google provider is configured. Real admin/professor/student acceptance testing and institution-approved privacy/support details remain necessary before inviting students. See [the audit](AUDIT.md) and [remaining setup](USER-SETUP-CHECKLIST.md). The production build cannot use the local role switch.
 
 ## 1. Check the application
 
@@ -25,7 +25,8 @@ Apply these SQL files in order in that project's SQL editor, once each:
 2. `backend/migrations/002_question_images.sql` — private image bucket and access policies.
 3. `backend/migrations/003_maintenance.sql` — deadline-finalization maintenance.
 4. `backend/migrations/004_assessment_integrity.sql` - question privacy, input validation, and blank-answer grading.
-5. `work/provision.local.sql` — your ignored admin/BMU provisioning file, already generated locally.
+5. `backend/migrations/005_availability.sql` - read-only database readiness check.
+6. `work/provision.local.sql` — your ignored admin/BMU provisioning file, already generated locally.
 
 For the existing ExamEngine project, these migrations are already applied. Do not rerun the combined setup or provisioning. For future upgrades, apply only new migration files in order.
 
@@ -112,3 +113,6 @@ Supabase documents a 500 MB free database allowance and possible pausing after l
 ## Institution decisions before real student use
 
 Publish an approved privacy notice, retention/deletion policy, and support contact. Confirm the expected concurrent student count, eligible rosters, hosting region, and how grades may be released. The in-app privacy summary describes collected fields but is not an institution's final approved policy. No real records are automatically deleted, and no camera, microphone, location, or proctoring telemetry is collected.
+
+
+For scheduled database readiness checks and Free plan pausing limits, see [availability operations](AVAILABILITY.md). Apply only migration 005 to an installation already at 004.
